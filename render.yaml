@@ -1,14 +1,14 @@
-# Render blueprint for the production web service.
+# Render blueprint for the hosted demo / sync target.
 #
-# Provision a paid Render Postgres instance in the same region separately, then
-# set DATABASE_URL to its internal connection string. Create the private S3
-# bucket separately too. All secret values are marked sync:false and must be
-# entered in the Render dashboard; never commit them here.
+# The app is SQLite-first (desktop and hosted use the same schema). On Render the
+# database and uploaded documents live on a persistent disk mounted at
+# /var/data; without that disk everything would be lost on each deploy.
 #
-# Storage defaults to Cloudflare R2. Set S3_ENDPOINT to
-# https://<account-id>.r2.cloudflarestorage.com in the Render dashboard.
-# For AWS S3 instead, remove S3_ENDPOINT, set S3_REGION to the bucket region,
-# set S3_FORCE_PATH_STYLE=false, and set S3_SSE=AES256.
+# The disk pins this service to a single instance, which the in-process rate
+# limiter and the sync endpoints already assume.
+#
+# Secret values are marked sync:false and must be entered in the Render
+# dashboard; never commit them here.
 
 services:
   - type: web
@@ -22,13 +22,17 @@ services:
     startCommand: npm start
     healthCheckPath: /login
     autoDeploy: true
+    disk:
+      name: lex-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 22.23.5
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        sync: false
+        value: file:/var/data/lex-indiana.db
       - key: AUTH_SECRET
         sync: false
       - key: APP_URL
@@ -36,24 +40,12 @@ services:
       - key: SESSION_COOKIE_SECURE
         value: "true"
       - key: STORAGE_DRIVER
-        value: s3
+        value: local
+      - key: STORAGE_ROOT
+        value: /var/data/storage
       - key: MAX_UPLOAD_MB
         value: "25"
       - key: TWO_FACTOR_ISSUER
         value: Lex Indiana
       - key: REGISTRATION_MODE
         value: bootstrap
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_REGION
-        value: auto
-      - key: S3_ENDPOINT
-        sync: false
-      - key: S3_FORCE_PATH_STYLE
-        value: "true"
-      - key: S3_SSE
-        value: none
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false

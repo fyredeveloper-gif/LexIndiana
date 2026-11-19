@@ -1,0 +1,49 @@
+# Desktop packaging. Windows is the first target; mac/linux targets can be added
+# once the dev shell has been validated.
+#
+# asar is disabled on purpose: Next, Prisma's query engine, and the embedded
+# server all spawn child processes and resolve files at runtime, which is the
+# most common failure mode when they are packed inside an asar archive.
+appId: com.lexindiana.desktop
+productName: Lex Indiana
+directories:
+  output: release
+  buildResources: build
+asar: false
+npmRebuild: false
+
+# Application code that runs at runtime. Production dependencies (next, react,
+# @prisma/client, prisma, bcryptjs, ...) are included automatically.
+files:
+  - desktop/**/*
+  - package.json
+  - next.config.mjs
+  - postcss.config.mjs
+  - "!desktop/build/**/*.map"
+
+# Runtime assets copied next to desktop/ (appRoot = resources/app).
+extraResources:
+  - from: .next
+    to: app/.next
+  - from: public
+    to: app/public
+  - from: prisma
+    to: app/prisma
+
+extraMetadata:
+  main: desktop/main.mjs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

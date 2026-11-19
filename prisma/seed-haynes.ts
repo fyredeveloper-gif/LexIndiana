@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { PrismaClient, type ContactType, type MatterStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { addDaysISO, parseIndianaDateTime, parseISODate, todayISO } from "../src/lib/dates";
+import { serializeAliases } from "../src/lib/aliases";
 import { calculateDeadline } from "../src/lib/deadlines";
 
 function loadEnv() {
@@ -153,7 +154,7 @@ async function main() {
         userId: user.id,
         type: input.type,
         name: input.name,
-        aliases: input.aliases ?? [],
+        aliases: serializeAliases(input.aliases),
         email: input.email ?? null,
         phone: input.phone ?? null,
         organization: input.organization ?? null,
@@ -247,25 +248,32 @@ async function main() {
     notes: "Synthetic demo matter. Inventory and accounting are pending.",
   });
 
-  await prisma.matterContact.createMany({
-    data: [
-      {
-        firmId: firm.id,
-        userId: user.id,
-        matterId: whitakerMatter.id,
-        contactId: ridgeline.id,
-        role: "OPPOSING_PARTY",
-      },
-      {
-        firmId: firm.id,
-        userId: user.id,
-        matterId: whitakerMatter.id,
-        contactId: ellison.id,
-        role: "OPPOSING_COUNSEL",
-      },
-    ],
-    skipDuplicates: true,
+  // SQLite does not support `skipDuplicates`, so filter what already exists and
+  // keep the seed idempotent without relying on provider-specific behaviour.
+  const linkedParties = await prisma.matterContact.findMany({
+    where: { firmId: firm.id, matterId: whitakerMatter.id },
+    select: { contactId: true },
   });
+  const linkedContactIds = new Set(linkedParties.map((party) => party.contactId));
+  const partiesToLink = [
+    {
+      firmId: firm.id,
+      userId: user.id,
+      matterId: whitakerMatter.id,
+      contactId: ridgeline.id,
+      role: "OPPOSING_PARTY" as const,
+    },
+    {
+      firmId: firm.id,
+      userId: user.id,
+      matterId: whitakerMatter.id,
+      contactId: ellison.id,
+      role: "OPPOSING_COUNSEL" as const,
+    },
+  ].filter((party) => !linkedContactIds.has(party.contactId));
+  if (partiesToLink.length > 0) {
+    await prisma.matterContact.createMany({ data: partiesToLink });
+  }
 
   const ensureTimeEntry = async (input: {
     matterId: string;

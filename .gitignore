@@ -28,6 +28,16 @@ pg.log
 # misc
 .DS_Store
 *.log
+
+# Local databases and desktop build output
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.tmp-test/
+release/
+desktop-dist/
+desktop/build/
 npm-debug.log*
 yarn-error.log*
 .vscode/

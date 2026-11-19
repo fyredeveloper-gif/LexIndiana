@@ -5,8 +5,8 @@ intake and conflict checking, matter management with Indiana cause numbers, a Tr
 deadline calculator, timekeeping, PDF invoicing, and `.docx` document assembly — all scoped
 to the signed-in user's firm, with attorney, paralegal, practice-manager, and consultant roles.
 
-**Stack:** Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · PostgreSQL · Prisma ·
-pdf-lib · docxtemplater · local or S3-compatible object storage
+**Stack:** Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · SQLite · Prisma ·
+pdf-lib · docxtemplater · local or S3-compatible object storage · Electron desktop shell
 
 ---
 
@@ -15,9 +15,8 @@ pdf-lib · docxtemplater · local or S3-compatible object storage
 ### Prerequisites
 
 - Node.js 22.x — pinned in `.nvmrc`; CI reads the same file
-- PostgreSQL 14+ — either a local server, a managed instance, or the embedded dev
-  database included as a devDependency
-- `openssl` (only to generate `AUTH_SECRET`)
+- No database server is required: the app uses SQLite (a local file)
+- `openssl` (optional, only to generate `AUTH_SECRET`)
 
 ### Install and configure
 
@@ -30,33 +29,37 @@ cp .env.example .env
 openssl rand -base64 48
 ```
 
-### Start PostgreSQL
+### Create the local database
 
-**Option A — embedded local database (development only)**
-
-```bash
-npm run db:local
-# postgres listens on 127.0.0.1:5432, database lex_indiana, postgres/postgres
-```
-
-Leave that process running in its own terminal.
-
-**Option B — your own PostgreSQL**
-
-Create a database and point `DATABASE_URL` at it:
-
-```bash
-createdb lex_indiana
-# DATABASE_URL="postgresql://user:password@localhost:5432/lex_indiana?schema=public"
-```
+Nothing to install or start. `DATABASE_URL="file:./dev.db"` in `.env` resolves to
+`prisma/dev.db`, which is created by the migration step. To move it, change the path in
+`DATABASE_URL` (a `file:` URL, absolute or relative to `prisma/`).
 
 ### Migrate, seed, run
 
 ```bash
-npm run db:migrate     # creates the schema (prisma migrate dev)
-npm run db:seed        # optional demo workspace
+npm run db:deploy      # applies prisma/migrations to the SQLite file
+npm run db:seed        # optional five-role demo workspace
 npm run dev            # http://localhost:3000
 ```
+
+### Desktop app (Windows-first)
+
+The same codebase runs as an Electron app with its own SQLite repository per environment.
+
+```bash
+npm run desktop:dev     # next dev + Electron window, hot reload
+npm run desktop:smoke   # verifies migrations, demo seed, embedded server and login
+npm run desktop:build   # Next build + electron-builder (unpacked app in release/)
+```
+
+On first launch the DEMO repository is created at
+`<userData>/data/demo/lex-indiana.db` and seeded with the synthetic Haynes firm. The LIVE
+repository (`<userData>/data/live/lex-indiana.db`) is separate and starts empty; switching
+between them from the **Environment** menu never deletes either one.
+
+Demo sign-in for the desktop DEMO repository: `quentin@lexindiana.test` / `IndianaLaw2026!`
+(synthetic data only; override with `LEX_DEMO_PASSWORD` before first launch).
 
 Demo credentials (created by `db:seed`; every account uses the same password):
 
@@ -339,11 +342,18 @@ code, so document assembly can be exercised without supplying a file.
 
 ## 5. Database
 
+SQLite, one file per environment. The schema lives in `prisma/schema.prisma`; migrations in
+`prisma/migrations` are SQLite migrations. The previous PostgreSQL migration history is kept
+for reference in `prisma/legacy-postgres-migrations/` and is not applied.
+
 ```bash
 npx prisma migrate dev --name <change>   # create a migration in development
-npx prisma migrate deploy                # apply migrations in production
+npx prisma migrate deploy                # apply migrations (dev, CI, desktop, hosted)
 npx prisma studio                        # inspect data
 ```
+
+SQLite has no array or enum column types: enums are stored as TEXT and validated by Prisma,
+and `Contact.aliases` is a JSON-encoded string handled by `src/lib/aliases.ts`.
 
 Key relationships: `Firm 1—* Membership *—1 User`, `Firm 1—* Matter 1—*
 TimeEntry/Deadline/Invoice/MatterDocument`, and `Invoice 1—* InvoiceItem`.
@@ -363,14 +373,16 @@ contains that backfill.
 See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the full production runbook, host
 configuration, and launch checklist.
 
-1. Provision PostgreSQL with TLS and point `DATABASE_URL` at it (append `sslmode=require`).
+1. Point `DATABASE_URL` at a SQLite file on a **persistent disk** (for example
+   `file:/var/data/lex-indiana.db`) and mount that disk at the same path.
 2. Set `AUTH_SECRET` (32+ random bytes), `APP_URL=https://your-domain`, and
    `SESSION_COOKIE_SECURE=true`.
 3. Choose storage:
    - **S3-compatible** (recommended): set `STORAGE_DRIVER=s3`, bucket, region, endpoint, and
      credentials. Grant only `s3:GetObject`, `s3:PutObject`, and `s3:DeleteObject` on the
      bucket prefix. Keep the bucket private — objects are never served directly.
-   - **Local**: mount a persistent volume at `STORAGE_ROOT` and back it up with the database.
+   - **Local** (default for the hosted demo): mount a persistent volume at `STORAGE_ROOT`
+     and back it up together with the SQLite file.
 4. Validate the production environment and run migrations during release:
    `npm run check:prod-env && npm run db:deploy`, then `npm run build && npm start`.
 5. Terminate TLS at your proxy and forward `X-Forwarded-For` so login rate limiting sees real

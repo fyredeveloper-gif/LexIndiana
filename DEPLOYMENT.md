@@ -1,10 +1,19 @@
 # Production deployment plan
 
 This is the production runbook for Lex Indiana. It assumes the current stack:
-Next.js 16 running as a long-lived Node 22 process, PostgreSQL, Prisma, and
-private S3-compatible document storage.
+Next.js 16 running as a long-lived Node 22 process, SQLite on a persistent disk,
+Prisma, and local or private S3-compatible document storage.
 
 **No production deployment has been performed.**
+
+> **Updated 2026-11-19 — SQLite-first, desktop-first.** The app no longer requires
+> PostgreSQL: `prisma/schema.prisma` targets SQLite, migrations in `prisma/migrations`
+> are SQLite, and `render.yaml` now mounts a 1 GB disk with
+> `DATABASE_URL=file:/var/data/lex-indiana.db`. Sections below that describe a managed
+> PostgreSQL instance or an embedded Postgres dev server are superseded; the S3/R2
+> storage guidance still applies if you set `STORAGE_DRIVER=s3`. The desktop app
+> (Electron) keeps one SQLite repository per environment under the OS app-data folder.
+> Manually verify the Render `preDeployCommand` has the disk mounted before relying on it.
 
 ## 1. Recommended hosting shape
 
