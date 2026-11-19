@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # Manual runs build the Windows artifact on demand, without a pull request.
+  workflow_dispatch:
 
 permissions:
   contents: read
