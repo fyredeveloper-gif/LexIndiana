@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lex Indiana">
+  <rect width="64" height="64" rx="14" fill="#0b1a29"/>
+  <g fill="none" stroke="#d2ad63" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 14v35M23 49h18M15 24h34"/>
+    <path d="M15 24l-7 14h14l-7-14M49 24l-7 14h14l-7-14"/>
+  </g>
+</svg>

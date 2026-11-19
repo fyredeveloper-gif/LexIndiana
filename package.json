@@ -1,0 +1,66 @@
+{
+  "name": "lex-indiana",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-tenant legal practice management and client intake platform for Indiana attorneys",
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "node scripts/build-safe.mjs",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run tests/e2e-auth.test.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "check:prod-env": "tsx scripts/check-prod-env.ts",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:haynes": "tsx prisma/seed-haynes.ts",
+    "db:studio": "prisma studio",
+    "db:local": "tsx scripts/dev-db.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@prisma/client": "^6.16.0",
+    "bcryptjs": "^3.0.2",
+    "docxtemplater": "^3.66.0",
+    "jose": "^6.0.0",
+    "next": "16.4.6",
+    "pdf-lib": "^1.17.1",
+    "pizzip": "^3.2.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@opennextjs/cloudflare": "1.20.12",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.12",
+    "@types/node": "^22.15.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "embedded-postgres": "^18.6.0-beta.19",
+    "jsdom": "^27.4.0",
+    "postcss": "^8.5.0",
+    "prisma": "^6.16.0",
+    "tailwindcss": "^4.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.1",
+    "wrangler": "4.148.0"
+  },
+  "overrides": {
+    "postcss": "$postcss",
+    "deepmerge-ts": "^8.0.0"
+  }
+}
