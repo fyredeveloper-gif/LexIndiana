@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   verify:
-    name: Typecheck, tests, and build
+    name: Typecheck, tests, build, and desktop smokes
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     env:
       # Tests create and migrate their own throwaway SQLite file (.tmp-test/).
@@ -47,3 +47,18 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      # The Electron shell and sync engine are only exercised by these scripts,
+      # which boot desktop/server.mjs against the build above. They stay in this
+      # job so a pull request pays for one install and one build.
+      #
+      # The demo seed ships as a pre-built esbuild bundle and both scripts seed
+      # a fresh DEMO repository on first launch, so bundle it first.
+      - name: Bundle demo seed
+        run: npm run desktop:seed:bundle
+
+      - name: Desktop smoke (install config, migrations, seed, settings, WAL)
+        run: npm run desktop:smoke
+
+      - name: Sync smoke (bootstrap, peer edit, conflict, offline)
+        run: npm run sync:smoke
