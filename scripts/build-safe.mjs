@@ -25,13 +25,17 @@ function restore() {
   }
 }
 
+const windows = process.platform === "win32";
+
 function run(command, args) {
-  const result = spawnSync(command, args, { stdio: "inherit", env: buildEnv });
+  // Windows cannot execute npx.cmd without a shell (EINVAL since Node 18), so
+  // `npm run build` must go through cmd.exe there.
+  const result = spawnSync(command, args, { stdio: "inherit", env: buildEnv, shell: windows });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed`);
 }
 
-const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+const npx = windows ? "npx.cmd" : "npx";
 let exitCode = 0;
 
 try {

@@ -109,3 +109,18 @@ jobs:
       # while the app tree is missing Prisma's generated client.
       - name: Verify packaged app layout
         run: node scripts/desktop-package-check.mjs release/win-unpacked/resources/app
+
+      # A complete layout can still hold a query engine that will not load on
+      # Windows, so boot the packaged tree and sign in. No window is opened.
+      - name: Smoke the packaged app (migrate, seed, sign in)
+        run: node scripts/desktop-package-smoke.mjs release/win-unpacked/resources/app
+
+      # The unpacked app needs no installer or signing, so a Windows PC can
+      # unzip this artifact and launch "Lex Indiana.exe" directly.
+      - name: Upload unpacked Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: lex-indiana-windows-unpacked
+          path: release/win-unpacked
+          retention-days: 7
+          if-no-files-found: error
