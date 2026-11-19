@@ -4,13 +4,21 @@ on:
   push:
   pull_request:
   # Manual runs build the Windows artifact on demand, without a pull request.
+  # Set "Windows only" to skip the Linux verify job and package just Windows.
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: "Skip the Linux verify job and only build the Windows artifact"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# Event type is part of the group so a manual Windows-only run does not cancel
+# an in-flight push or pull-request build of the same branch.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -18,6 +26,8 @@ jobs:
     name: Typecheck, tests, build, and desktop smokes
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # A manual run can ask for only the Windows artifact.
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
 
     env:
       # Tests create and migrate their own throwaway SQLite file (.tmp-test/).
