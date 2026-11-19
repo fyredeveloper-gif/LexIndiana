@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { PrismaClient } from "@prisma/client";
 import os from "node:os";
 import path from "node:path";
+import { backupDatabase, clearEnvironmentData } from "../desktop/backup.mjs";
 import { readConfig } from "../desktop/config.mjs";
 import { environmentPaths } from "../desktop/paths.mjs";
 import { demoPassword, DEMO_EMAIL, desktopServerEnv } from "../desktop/runtime.mjs";
@@ -91,6 +93,24 @@ try {
   const second = await seedDemoIfNeeded({ appRoot, paths: { ...paths, fresh: false }, baseEnv: env });
   check("seed is skipped on later launches", second.seeded === false);
 
+  // Demo reset primitives: back up, clear, keep the backup.
+  const scratchDir = mkdtempSync(path.join(os.tmpdir(), "lex-desktop-reset-"));
+  try {
+    const scratchPaths = environmentPaths(scratchDir, "demo");
+    mkdirSync(path.dirname(scratchPaths.dbFile), { recursive: true });
+    writeFileSync(scratchPaths.dbFile, "demo-database");
+    const backup = backupDatabase(scratchPaths);
+    check(
+      "reset backs up the demo database first",
+      Boolean(backup && existsSync(backup) && backup.startsWith(scratchPaths.backupDir)),
+    );
+    clearEnvironmentData(scratchPaths);
+    check("reset removes the old demo database", !existsSync(scratchPaths.dbFile));
+    check("reset keeps the backup after clearing", Boolean(backup && existsSync(backup)));
+  } finally {
+    rmSync(scratchDir, { recursive: true, force: true });
+  }
+
   server = spawn(process.execPath, [path.join("desktop", "server.mjs")], {
     cwd: appRoot,
     env: { ...process.env, ...env, LEX_APP_ROOT: appRoot, LEX_PORT: String(port) },
@@ -122,6 +142,24 @@ try {
 
   const calendar = await fetch(`http://127.0.0.1:${port}/calendar`, { headers: { cookie } });
   check("calendar page renders", calendar.status === 200);
+
+  check(
+    "server switches the demo database to WAL",
+    /\[db\] sqlite journal_mode=wal/.test(serverLog),
+    serverLog.slice(-500),
+  );
+  const probe = new PrismaClient({ datasources: { db: { url: `file:${paths.dbFile}` } } });
+  try {
+    const [journal] = await probe.$queryRawUnsafe("PRAGMA journal_mode");
+    check("demo database file stays in WAL mode", String(journal?.journal_mode).toLowerCase() === "wal");
+  } finally {
+    await probe.$disconnect();
+  }
+
+  const desktopSettings = await fetch(`http://127.0.0.1:${port}/settings/desktop`, { headers: { cookie } });
+  check("desktop settings page renders", desktopSettings.status === 200, `status ${desktopSettings.status}`);
+  const desktopSettingsHtml = await desktopSettings.text();
+  check("desktop settings page is the desktop panel route", /Desktop settings/i.test(desktopSettingsHtml));
 
   const liveEnv = desktopServerEnv({
     userDataDir,

@@ -538,3 +538,73 @@ model MatterDocument {
 
   @@index([firmId, matterId])
 }
+
+// ---------------------------------------------------------------------------
+// Sync (Phase 2)
+//
+// SyncOperation doubles as the local outbox and the server's change feed:
+// every captured write appends one row; a device pushes rows it has not pushed
+// yet (pushedAt IS NULL) and pulls rows created by other devices.
+// Payloads are JSON text so the same code runs on SQLite and PostgreSQL.
+// ---------------------------------------------------------------------------
+model SyncOperation {
+  id            String    @id @default(cuid())
+  firmId        String
+  deviceId      String
+  entity        String
+  entityId      String
+  operation     String
+  payload       String?
+  baseUpdatedAt DateTime?
+  createdAt     DateTime  @default(now())
+  pushedAt      DateTime?
+  attempts      Int       @default(0)
+  lastError     String?
+
+  @@index([firmId, createdAt])
+  @@index([firmId, deviceId, pushedAt])
+  @@index([firmId, entity, entityId])
+}
+
+/// One row per (firm, device): pull cursor, last successful push, bootstrap marker.
+model SyncCursor {
+  id              String    @id
+  firmId          String
+  deviceId        String
+  lastPulledAt    DateTime?
+  lastPushedAt    DateTime?
+  lastBootstrapAt DateTime?
+  lastError       String?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([firmId])
+}
+
+/// Deletion markers so a late CREATE cannot resurrect a deleted record.
+model SyncTombstone {
+  id        String   @id @default(cuid())
+  firmId    String
+  deviceId  String
+  entity    String
+  entityId  String
+  deletedAt DateTime @default(now())
+
+  @@unique([firmId, entity, entityId])
+  @@index([firmId, deletedAt])
+}
+
+/// A losing local edit. The server version is kept; the user can review it.
+model SyncConflict {
+  id            String    @id @default(cuid())
+  firmId        String
+  deviceId      String
+  entity        String
+  entityId      String
+  localPayload  String?
+  remotePayload String?
+  status        String    @default("OPEN")
+  createdAt     DateTime  @default(now())
+  resolvedAt    DateTime?
+
+  @@index([firmId, status])
+}

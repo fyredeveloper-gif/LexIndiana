@@ -50,6 +50,8 @@ const env = desktopServerEnv({
   environment: config.environment,
   port,
   authSecret: config.authSecret,
+  sync: config.sync,
+  deviceId: config.deviceId,
 });
 
 console.log(`[desktop:dev] environment=${config.environment} data=${userDataDir}`);

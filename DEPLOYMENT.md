@@ -6,25 +6,23 @@ Prisma, and local or private S3-compatible document storage.
 
 **No production deployment has been performed.**
 
-> **Updated 2026-11-19 — SQLite-first, desktop-first.** The app no longer requires
-> PostgreSQL: `prisma/schema.prisma` targets SQLite, migrations in `prisma/migrations`
-> are SQLite, and `render.yaml` now mounts a 1 GB disk with
-> `DATABASE_URL=file:/var/data/lex-indiana.db`. Sections below that describe a managed
-> PostgreSQL instance or an embedded Postgres dev server are superseded; the S3/R2
-> storage guidance still applies if you set `STORAGE_DRIVER=s3`. The desktop app
-> (Electron) keeps one SQLite repository per environment under the OS app-data folder.
-> Manually verify the Render `preDeployCommand` has the disk mounted before relying on it.
+> **Updated 2026-11-19 — SQLite-first, desktop-first.** One SQLite file per deployment;
+> `render.yaml` mounts a 1 GB disk with `DATABASE_URL=file:/var/data/lex-indiana.db`.
+> The S3/R2 storage guidance still applies if you set `STORAGE_DRIVER=s3`. The desktop
+> app (Electron) keeps one SQLite repository per environment under the OS app-data
+> folder. Verify the Render `preDeployCommand` can see the disk before relying on it;
+> if it cannot, apply migrations at start instead.
 
 ## 1. Recommended hosting shape
 
-Use a managed container/PaaS that runs a persistent Node process, with managed
-PostgreSQL in the same region and a private object bucket:
+Use a managed container/PaaS that runs a persistent Node process with a
+persistent disk for the SQLite file (and uploads, unless you use S3):
 
 | Layer | Recommendation | Why |
 | --- | --- | --- |
 | App | Render Web Service (paid, one instance) | Runs `next start` on Node 22, supports a pre-deploy migration command, health checks, custom domains, and TLS without a serverless request-body cap. |
-| Database | Render Postgres (paid) | Private in-region connection, continuous backups/PITR on paid plans, no separate database vendor to wire up. |
-| Files | Private AWS S3 bucket (or Cloudflare R2) | The app already supports S3-compatible storage. Local disk is not durable on an app instance and is not suitable for production. |
+| Database | SQLite file on the persistent disk | One file, no database service. The disk also pins the service to one instance, which the in-process rate limiter and sync worker already require. |
+| Files | Same disk, or private AWS S3 bucket (Cloudflare R2) | Local disk keeps setup small; S3 remains supported for larger deployments. |
 | DNS/TLS | Custom domain on Render | Managed certificate and HTTPS termination. |
 
 Do not use Vercel for this build as-is: its serverless request-body limit is
@@ -33,15 +31,15 @@ require direct-to-S3 uploads and an external rate limiter, which are not
 implemented.
 
 Cloudways is a reasonable fallback if you prefer a managed VPS, but you would
-own PostgreSQL patching, backups, process supervision, and TLS. It is more
-operational work than the Render shape above.
+own database-file backups, process supervision, and TLS. It is more operational
+work than the Render shape above.
 
 ## 2. Service configuration
 
-Create one paid web service and one paid PostgreSQL instance in the same region.
+Create one paid web service with a persistent disk in the same region as your users.
 [`render.yaml`](render.yaml) contains the web-service settings; it intentionally
-leaves the database and secrets to the dashboard because those are account and
-region-specific. Provision the database and private bucket first.
+leaves secrets to the dashboard because those are account-specific. Attach the disk
+before the first deploy, and create a private bucket only if you use S3 storage.
 
 | Setting | Value |
 | --- | --- |
@@ -77,7 +75,7 @@ real `.env`.
 
 | Variable | Value / notes |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string. Use the provider's **internal/private** URL for the app when available. If connecting over the public internet, require TLS (`sslmode=require` or stricter). |
+| `DATABASE_URL` | Absolute SQLite file path on the persistent disk, e.g. `file:/var/data/lex-indiana.db`. The directory must exist and be writable by the app. |
 | `AUTH_SECRET` | At least 32 random characters, e.g. `openssl rand -base64 48`. Used for the 2FA challenge cookie and intake IP hashing. Changing it invalidates pending 2FA challenges. |
 | `APP_URL` | Exact public origin, no trailing slash, e.g. `https://app.yourfirm.com`. Required for secure cookies and for invitation/intake links. |
 | `SESSION_COOKIE_SECURE` | `true` in production. |
@@ -119,36 +117,27 @@ providers that reject the AES256 header.
 
 ## 4. Database and migrations
 
-1. Create the production database in the same region as the app.
-2. Back up or snapshot it before every schema-changing release. Render's paid
-   plans provide point-in-time recovery; export a logical backup before the
-   first release and keep a scheduled off-provider backup.
+1. Attach the persistent disk (mounted at `/var/data` in `render.yaml`) and point
+   `DATABASE_URL` at a file on it.
+2. Copy the SQLite file before every schema-changing release and keep scheduled
+   off-provider backups. Stop the service before copying, or include the
+   `-wal`/`-shm` files so the copy is consistent.
 3. Apply migrations only through `npm run db:deploy` in the pre-deploy step.
    Do not run `prisma migrate dev`, `db:push`, or `db:seed` in production.
 4. Do not run `npm run db:seed`. It creates demo users and demo firm data.
 5. With the default `REGISTRATION_MODE=bootstrap`, `/register` is available
    only while no firm exists. Register the first owner immediately after the
    first deploy; that creates the firm and OWNER membership in one transaction. Concurrent bootstrap attempts are
-   serialized with a PostgreSQL advisory lock, so only one firm can be created;
-   registration then closes automatically. Use `REGISTRATION_MODE=open`
+   serialized with an in-process lock (`src/lib/bootstrap-lock.ts`), so only one
+   firm can be created on the single instance; registration then closes automatically. Use `REGISTRATION_MODE=open`
    only if public firm creation is intended, or `closed` to disable it entirely.
    The API enforces the same policy as the page.
 
-For a stronger privilege split, use a migration role for the pre-deploy step
-and a runtime role with DML-only access for the web service. If you do this,
-grant the runtime role privileges on existing and future tables before the
-first deploy. A single owner role is acceptable for the initial launch but is
-not the long-term least-privilege configuration.
-
-Keep migrations backward-compatible during a rolling release:
-
-1. Add nullable columns/tables first.
-2. Deploy application code that tolerates both shapes.
-3. Backfill.
-4. Remove old columns in a later release.
-
-Prisma migrations are forward-only; rollback is application rollback plus a
-database restore if a bad migration cannot be reversed safely.
+SQLite has no database roles: the app process can read and write the file. Keep
+the disk private to the service user and rely on host-level access control. With
+one instance there is no rolling migration window; migrations run in the
+pre-deploy step, and rollback is application rollback plus restoring the
+database file if a migration cannot be reversed safely.
 
 ## 5. File storage
 
@@ -163,8 +152,9 @@ database restore if a bad migration cannot be reversed safely.
   before they reach storage; a renamed non-Word file is rejected with 415.
 - There is no CORS requirement: uploads and downloads pass through authenticated
   Next.js route handlers, never directly from the browser to the bucket.
-- Back up object storage together with PostgreSQL. Invoice items and document
-  rows reference each other, so a database-only restore can leave broken links.
+- Back up object storage together with the SQLite file. Invoice items and
+  document rows reference each other, so a database-only restore can leave
+  broken links.
 - Use a separate backup bucket/credential for database dumps and object
   replication; do not give the application credential access to backups.
 
@@ -215,8 +205,9 @@ database restore if a bad migration cannot be reversed safely.
 
 ## 8. Backups, monitoring, and rollback
 
-- Database: paid PITR plus a scheduled logical dump stored outside the app
-  account. Test a restore before launch, not during an incident.
+- Database: scheduled copies of the SQLite file (after a clean stop, or with
+  its `-wal`/`-shm` files) stored outside the app account, plus any disk snapshot
+  the provider offers. Test a restore before launch, not during an incident.
 - Objects: versioning, lifecycle/retention, and a copy or replication policy
   appropriate to the firm's retention obligations.
 - Monitoring: uptime check on `/login`, error-rate/log alerts, disk/connection

@@ -8,9 +8,9 @@ import { environmentPaths } from "./paths.mjs";
  * - bootstrap registration in LIVE (first firm, then closed) and closed
  *   registration in DEMO, where the demo account is seeded.
  *
- * @param {{ userDataDir: string; environment: "demo" | "live"; port: number; authSecret: string }} options
+ * @param {{ userDataDir: string; environment: "demo" | "live"; port: number; authSecret: string; sync?: { enabled: boolean; endpoint: string; secret: string }; deviceId?: string }} options
  */
-export function desktopServerEnv({ userDataDir, environment, port, authSecret }) {
+export function desktopServerEnv({ userDataDir, environment, port, authSecret, sync, deviceId }) {
   const paths = environmentPaths(userDataDir, environment);
   return {
     NODE_ENV: "production",
@@ -24,9 +24,11 @@ export function desktopServerEnv({ userDataDir, environment, port, authSecret })
     AUTH_SECRET: authSecret,
     REGISTRATION_MODE: environment === "demo" ? "closed" : "bootstrap",
     TWO_FACTOR_ISSUER: "Lex Indiana",
-    // Read by the desktop shell, ignored by the web app.
-    LEX_DESKTOP: "1",
-    LEX_ENVIRONMENT: environment,
+    // Background sync (Phase 2). Inert when no endpoint is configured.
+    LEX_SYNC_ENABLED: sync?.enabled ? "1" : "0",
+    LEX_SYNC_ENDPOINT: sync?.endpoint ?? "",
+    LEX_SYNC_SECRET: sync?.secret ?? "",
+    LEX_DEVICE_ID: deviceId || "desktop",
   };
 }
 

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("lexDesktop", {
   getState: () => ipcRenderer.invoke("desktop:state"),
   setEnvironment: (environment) => ipcRenderer.invoke("desktop:set-environment", environment),
   setSync: (settings) => ipcRenderer.invoke("desktop:set-sync", settings),
+  resetDemo: () => ipcRenderer.invoke("desktop:reset-demo"),
   openDataFolder: () => ipcRenderer.invoke("desktop:open-data-folder"),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);

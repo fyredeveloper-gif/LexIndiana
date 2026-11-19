@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { Icon } from "@/components/icons";
+import { SyncStatus } from "@/components/sync-status";
 import { TimerWidget, type ActiveTimer } from "@/components/timer-widget";
 import { STAFF_ROLE_LABELS, can, canAny, type Capability } from "@/lib/permissions";
 import type { StaffRole } from "@prisma/client";
@@ -97,6 +98,7 @@ export function Sidebar({
 
         <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
           {showTimer ? <TimerWidget active={activeTimer} /> : null}
+          <SyncStatus />
           <div className="flex items-center gap-2.5 px-1">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink-800 text-[11px] font-semibold text-brass-200">
               {initials(user.name)}

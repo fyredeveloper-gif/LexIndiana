@@ -15,8 +15,12 @@ const nextConfig = {
   // Allows the E2E test runner to build in an isolated directory without
   // touching the development/production `.next` output.
   distDir: process.env.NEXT_DIST_DIR || ".next",
-  // Development-only: allow the cloud preview host to load dev assets and HMR.
-  allowedDevOrigins: ["pv-a0d87b30f0f4-7435e6cc-91b2-45ad-abbd-d4581f437910.style.dev"],
+  // Development-only extra hosts for dev assets and HMR (comma-separated).
+  // Kept out of source so a checkout is not tied to one preview environment.
+  allowedDevOrigins: (process.env.ALLOWED_DEV_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   serverExternalPackages: ["@prisma/client", "prisma", "pizzip", "docxtemplater"],
   async headers() {
     const hsts = (process.env.APP_URL ?? "").startsWith("https://")

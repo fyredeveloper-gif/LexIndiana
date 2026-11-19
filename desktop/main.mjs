@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Menu, ipcMain, shell } from "electron";
+import { backupDatabase, clearEnvironmentData } from "./backup.mjs";
 import { readConfig, updateConfig } from "./config.mjs";
 import { environmentPaths, isEnvironment } from "./paths.mjs";
 import { desktopServerEnv } from "./runtime.mjs";
@@ -50,20 +51,34 @@ async function waitForServer(url, timeoutMs = 90_000) {
   throw new Error(`The local server did not start within ${Math.round(timeoutMs / 1000)}s.`);
 }
 
-function stopBackend() {
-  if (!backend) return;
-  const pid = backend.pid;
+async function stopBackend() {
+  const child = backend;
   backend = null;
+  const pid = child?.pid;
   if (!pid) return;
-  if (process.platform === "win32") {
-    spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-  } else {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // Already gone.
+
+  // Wait for the process to exit: SQLite and the Prisma engine must release the
+  // database file before migrations reopen it for another environment.
+  await new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    child.once("exit", done);
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    } else {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        done();
+        return;
+      }
     }
-  }
+    setTimeout(done, 5000).unref();
+  });
 }
 
 function currentState() {
@@ -73,7 +88,15 @@ function currentState() {
   return {
     environment: config.environment,
     environments: ["demo", "live"],
-    sync: config.sync,
+    // Never send the peer secret to the renderer; it only needs to know whether
+    // one is saved.
+    sync: {
+      enabled: config.sync.enabled,
+      endpoint: config.sync.endpoint,
+      hasSecret: config.sync.secret.length > 0,
+    },
+    deviceId: config.deviceId,
+    backupFolder: paths.backupDir,
     databasePath: paths.dbFile,
     dataFolder: paths.root,
     version: app.getVersion(),
@@ -104,6 +127,8 @@ async function startBackend() {
     environment: config.environment,
     port,
     authSecret: config.authSecret,
+    sync: config.sync,
+    deviceId: config.deviceId,
   });
 
   const paths = await migrateEnvironment({
@@ -137,7 +162,32 @@ async function startBackend() {
   });
 
   backend = child;
-  await waitForServer(`${backendUrl}/login`);
+  try {
+    await waitForServer(`${backendUrl}/login`);
+  } catch (error) {
+    await stopBackend();
+    throw error;
+  }
+}
+
+/**
+ * Restart the embedded server so it picks up a new environment or sync config.
+ * In dev the server is external and can only be restarted by the developer.
+ */
+async function restartBackend() {
+  if (devServerUrl) {
+    backendUrl = devServerUrl;
+    broadcastState();
+    return { restartRequired: true };
+  }
+
+  await stopBackend();
+  await startBackend();
+  lastError = null;
+  if (mainWindow) await mainWindow.loadURL(`${backendUrl}/login`);
+  buildMenu();
+  broadcastState();
+  return { restartRequired: false };
 }
 
 async function createWindow() {
@@ -220,7 +270,12 @@ function buildMenu() {
           click: () => void switchEnvironment("live"),
         },
         { type: "separator" },
-        { label: "Sync now (Phase 2)", enabled: false },
+        {
+          label: "Desktop settings…",
+          click: () => {
+            if (mainWindow && backendUrl) void mainWindow.loadURL(`${backendUrl}/settings/desktop`);
+          },
+        },
       ],
     },
   ];
@@ -235,23 +290,13 @@ async function switchEnvironment(environment) {
 
   updateConfig(userDataDir, { environment });
 
-  if (devServerUrl) {
-    // The dev server is bound to one database at startup; a restart is required.
-    return {
-      ok: true,
-      restartRequired: true,
-      state: currentState(),
-    };
-  }
-
   try {
-    stopBackend();
-    await startBackend();
-    if (mainWindow) await mainWindow.loadURL(`${backendUrl}/login`);
-    buildMenu();
-    broadcastState();
-    return { ok: true, state: currentState() };
+    const restart = await restartBackend();
+    return { ok: true, restartRequired: restart.restartRequired, state: currentState() };
   } catch (error) {
+    // Restore the previous repository as the launch target so a failed start
+    // does not strand the app on an environment that cannot open.
+    updateConfig(userDataDir, { environment: current.environment });
     lastError = error instanceof Error ? error.message : "Could not switch environment.";
     broadcastState();
     return { ok: false, error: lastError, state: currentState() };
@@ -266,15 +311,59 @@ ipcMain.handle("desktop:set-environment", async (_event, environment) => {
 });
 
 ipcMain.handle("desktop:set-sync", async (_event, settings) => {
-  const endpoint = typeof settings?.endpoint === "string" ? settings.endpoint.trim() : "";
+  const endpoint = typeof settings?.endpoint === "string" ? settings.endpoint.trim().replace(/\/+$/, "") : "";
   if (endpoint && !/^https?:\/\//i.test(endpoint)) {
     return { ok: false, error: "The sync endpoint must start with http:// or https://." };
   }
-  updateConfig(app.getPath("userData"), {
-    sync: { enabled: settings?.enabled === true, endpoint },
+  const userDataDir = app.getPath("userData");
+  const current = readConfig(userDataDir);
+  // An empty field means "keep the saved secret"; only an explicit clear
+  // removes it, so the UI never has to display the value.
+  const typed = typeof settings?.secret === "string" ? settings.secret.trim() : "";
+  const secret = typed || (settings?.clearSecret === true ? "" : current.sync.secret);
+  updateConfig(userDataDir, {
+    sync: { enabled: settings?.enabled === true, endpoint, secret },
   });
-  broadcastState();
-  return { ok: true, state: currentState() };
+
+  // The embedded server reads sync settings from its environment, so a change
+  // only takes effect after a restart.
+  try {
+    const restart = await restartBackend();
+    return { ok: true, restartRequired: restart.restartRequired, state: currentState() };
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : "Could not apply sync settings.";
+    broadcastState();
+    return { ok: false, error: lastError, state: currentState() };
+  }
+});
+
+ipcMain.handle("desktop:reset-demo", async () => {
+  const userDataDir = app.getPath("userData");
+  const config = readConfig(userDataDir);
+  if (config.environment !== "demo") {
+    return { ok: false, error: "Only the demo repository can be reset." };
+  }
+  if (devServerUrl) {
+    return {
+      ok: false,
+      error: "Demo reset runs from the packaged app, where the local server can restart cleanly.",
+    };
+  }
+
+  try {
+    // Stop first so SQLite has flushed, then copy the file before removing it.
+    await stopBackend();
+    const paths = environmentPaths(userDataDir, "demo");
+    const backupPath = backupDatabase(paths);
+    clearEnvironmentData(paths);
+
+    await restartBackend();
+    return { ok: true, backupPath, state: currentState() };
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : "Could not reset the demo repository.";
+    broadcastState();
+    return { ok: false, error: lastError, state: currentState() };
+  }
 });
 
 ipcMain.handle("desktop:open-data-folder", async () => {
@@ -324,7 +413,9 @@ if (!gotLock) {
     if (BrowserWindow.getAllWindows().length === 0 && !lastError) await createWindow();
   });
 
-  app.on("before-quit", stopBackend);
+  app.on("before-quit", () => {
+    void stopBackend();
+  });
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();

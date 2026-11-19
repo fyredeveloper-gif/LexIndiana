@@ -17,13 +17,15 @@ function defaults() {
     version: 1,
     environment: DEFAULT_ENVIRONMENT,
     authSecret: randomBytes(32).toString("base64url"),
+    // Stable per-install device identity; the sync feed excludes own changes.
+    deviceId: `desktop-${randomBytes(6).toString("hex")}`,
     sync: {
       enabled: false,
-      // Empty = not configured. Sync is a no-op until Phase 2 lands.
+      // Peer base URL, e.g. http://127.0.0.1:3100. Empty = local-only.
       endpoint: "",
-      lastSyncedAt: null,
+      // Shared peer secret (SYNC_SECRET on the peer). Never sent to the browser.
+      secret: "",
     },
-    demoSeeded: false,
   };
 }
 
@@ -39,12 +41,15 @@ function normalize(raw) {
       typeof value.authSecret === "string" && value.authSecret.length >= 32
         ? value.authSecret
         : base.authSecret,
+    deviceId:
+      typeof value.deviceId === "string" && value.deviceId.length >= 4
+        ? value.deviceId
+        : base.deviceId,
     sync: {
       enabled: value.sync?.enabled === true,
       endpoint: typeof value.sync?.endpoint === "string" ? value.sync.endpoint : "",
-      lastSyncedAt: typeof value.sync?.lastSyncedAt === "string" ? value.sync.lastSyncedAt : null,
+      secret: typeof value.sync?.secret === "string" ? value.sync.secret : "",
     },
-    demoSeeded: value.demoSeeded === true,
   };
 }
 
@@ -85,7 +90,7 @@ export function writeConfig(userDataDir, config) {
 
 /**
  * @param {string} userDataDir
- * @param {Partial<{ environment: "demo" | "live"; sync: { enabled: boolean; endpoint: string }; demoSeeded: boolean }>} patch
+ * @param {Partial<{ environment: "demo" | "live"; sync: Partial<{ enabled: boolean; endpoint: string; secret: string }> }>} patch
  */
 export function updateConfig(userDataDir, patch) {
   const current = readConfig(userDataDir);

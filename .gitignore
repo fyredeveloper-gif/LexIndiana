@@ -43,6 +43,7 @@ yarn-error.log*
 .vscode/
 .idea/
 coverage/
+/artifacts/
 /freebuff-sites-build/
 /.open-next/
 /.wrangler/

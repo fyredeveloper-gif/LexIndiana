@@ -28,7 +28,12 @@ const handle = app.getRequestHandler();
 await app.prepare();
 
 const server = createServer((request, response) => {
-  handle(request, response);
+  // A rejected request handler must not take the desktop server down.
+  Promise.resolve(handle(request, response)).catch((error) => {
+    console.error("[desktop] request failed", error);
+    if (!response.headersSent) response.statusCode = 500;
+    response.end();
+  });
 });
 
 server.listen(port, hostname, () => {

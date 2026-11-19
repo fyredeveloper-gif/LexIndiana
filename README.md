@@ -51,7 +51,15 @@ The same codebase runs as an Electron app with its own SQLite repository per env
 npm run desktop:dev     # next dev + Electron window, hot reload
 npm run desktop:smoke   # verifies migrations, demo seed, embedded server and login
 npm run desktop:build   # Next build + electron-builder (unpacked app in release/)
+npm run sync:smoke      # two instances: bootstrap, peer edit, conflict, offline
 ```
+
+Sync is off until a target is configured. Point a desktop build at a demo sync server with
+`LEX_SYNC_ENABLED=1`, `LEX_SYNC_ENDPOINT=http://127.0.0.1:<port>`, `LEX_SYNC_SECRET` set to
+the peer's `SYNC_SECRET`, and a stable `LEX_DEVICE_ID`. The sidebar chip shows
+Synced/pending/error with a **Sync now** button; unresolved conflicts are counted there.
+Changes to staff, contacts, matters, tasks, calendar events and deadlines sync automatically
+(never sessions, invitations, audit logs, time entries, invoices or documents).
 
 On first launch the DEMO repository is created at
 `<userData>/data/demo/lex-indiana.db` and seeded with the synthetic Haynes firm. The LIVE
@@ -60,6 +68,12 @@ between them from the **Environment** menu never deletes either one.
 
 Demo sign-in for the desktop DEMO repository: `quentin@lexindiana.test` / `IndianaLaw2026!`
 (synthetic data only; override with `LEX_DEMO_PASSWORD` before first launch).
+
+**Settings → Desktop settings** (or **Environment → Desktop settings…**) switches between the
+Demo and Live repositories, turns sync Offline/Online and edits the endpoint and peer secret,
+and resets the demo data. Switching never deletes records; a reset copies the demo database to
+`data/demo/backups/` before clearing it, and is only offered in the packaged app while the Demo
+repository is active.
 
 Demo credentials (created by `db:seed`; every account uses the same password):
 
@@ -93,8 +107,8 @@ npm run db:studio      # Prisma Studio
 
 ### Automated tests
 
-`npm test` runs against an isolated PostgreSQL schema (`lex_indiana_test` by
-default), never the development `public` schema. Global setup runs
+`npm test` runs against a throwaway SQLite file (`.tmp-test/lex-indiana-test.db`
+by default), never your development database. Global setup runs
 `prisma migrate deploy`, then each run clears its own test data. The suite covers:
 
 - the complete staff-role capability matrix;
@@ -105,11 +119,8 @@ default), never the development `public` schema. Global setup runs
 - cross-firm lookups and API writes returning 404.
 
 The tests create their own firms, users, matters, invoices, invitations, and intakes,
-so no demo seed is required. With the embedded database running (`npm run db:local`)
-and a local `DATABASE_URL`, no extra setup is needed. For a dedicated CI database, set
-`TEST_DATABASE_URL`; `TEST_DATABASE_SCHEMA` overrides the schema name. The runner
-refuses to create a test schema on a non-local `DATABASE_URL` unless
-`TEST_DATABASE_URL` is set explicitly.
+so no demo seed is required and no database server has to run. `TEST_DATABASE_URL`
+can point the suite at a different SQLite file; it must be a `file:` URL.
 
 One test builds an isolated production app into `.next-e2e`, serves it with
 `next start` on an ephemeral port, and then signs in through `/api/auth/login` with a
@@ -118,8 +129,8 @@ it without a cookie, and uses the resulting session to call a role-gated API. Th
 covers the real cookie/session path that the route-handler tests mock.
 
 `.github/workflows/ci.yml` uses the Node version from `.nvmrc` and runs typecheck,
-the full test suite, and the production build on every push and pull request
-against a PostgreSQL service container.
+the full test suite, and the production build on every push and pull request. No
+database service container is needed.
 
 ---
 
@@ -127,7 +138,7 @@ against a PostgreSQL service container.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | yes | PostgreSQL connection string |
+| `DATABASE_URL` | yes | SQLite file URL, for example `file:./dev.db` (resolved from `prisma/`) |
 | `AUTH_SECRET` | yes | 32+ character secret used to sign the short-lived 2FA challenge token |
 | `APP_URL` | yes (production) | Public origin, used for `Secure` cookie inference and absolute invitation/intake links |
 | `SESSION_COOKIE_SECURE` | no | `true` forces the `Secure` cookie attribute behind HTTPS |
@@ -355,6 +366,11 @@ npx prisma studio                        # inspect data
 SQLite has no array or enum column types: enums are stored as TEXT and validated by Prisma,
 and `Contact.aliases` is a JSON-encoded string handled by `src/lib/aliases.ts`.
 
+The server switches the file to WAL mode and a 5 s busy timeout on startup
+(`src/lib/sqlite.ts`), so the background sync worker and interactive writes can overlap
+without `database is locked` failures. Commits can still sit in the `-wal` file, so include
+it whenever a database file is copied or restored by hand.
+
 Key relationships: `Firm 1—* Membership *—1 User`, `Firm 1—* Matter 1—*
 TimeEntry/Deadline/Invoice/MatterDocument`, and `Invoice 1—* InvoiceItem`.
 `TimeEntry.invoiceId` is `SetNull` if an invoice is removed; `Invoice.matterId` is `Restrict`
@@ -401,7 +417,9 @@ prisma/
   migrations/            committed SQL migrations
   seed.ts                demo workspace
 scripts/
-  dev-db.ts              embedded PostgreSQL for local development
+  desktop-dev.mjs        next dev + Electron window
+  desktop-smoke.mjs      migrations, seed, embedded server, login
+  sync-smoke.mjs         two-instance sync bootstrap/conflict/offline test
 src/
   app/
     (auth)/              login, registration, 2FA challenge
@@ -445,4 +463,5 @@ src/
   Removing a member ends workspace access immediately but does not delete records they created.
 - The audit log covers security- and ethics-sensitive events, not every record edit. It is not
   cryptographically chained and has no external retention/export job.
-- The embedded PostgreSQL script is for local development only.
+- The desktop shell and its per-environment SQLite repositories require the packaged
+  Electron app; the hosted deployment runs a single SQLite file on a persistent disk.

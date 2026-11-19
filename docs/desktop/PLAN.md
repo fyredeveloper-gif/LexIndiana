@@ -1,7 +1,7 @@
 # Lex Indiana → Desktop App: Audit & Plan
 
-Status: **Phases 0 and 1 implemented** (see §7). Sync (Phase 2), modes UI (Phase 3) and
-integration interfaces (Phase 4) are not built yet. This document holds the audit, the
+Status: **Phases 0–3 implemented** (see §7). Integration interfaces (Phase 4) are
+not built yet. This document holds the audit, the
 architecture decision, and the proposed structure.
 
 Decisions taken (2026-11-19): SQLite everywhere · local demo sync server · Windows x64 +
@@ -278,12 +278,60 @@ the two Postgres-only constructs, `tests/global-setup.ts`, `package.json`, `READ
   (Next build + electron-builder, Windows NSIS/portable).
 - Demo seed bundle (`desktop/build/seed-haynes.mjs`) so the packaged app needs no TypeScript.
 
+### Done — Phase 2 (sync engine)
+
+- Sync tables: `SyncOperation` (local outbox **and** peer change feed, with `pushedAt`,
+  `attempts`, `lastError`), `SyncCursor` per (firm, device), `SyncTombstone`, `SyncConflict`.
+- Automatic capture: a `$extends` `$allModels.$allOperations` hook in `src/lib/prisma.ts`
+  records create/update/upsert/delete/updateMany/deleteMany for `Firm`, `User`,
+  `Membership`, `Contact`, `Matter`, `MatterContact`, `Task`, `CalendarEvent`, `Deadline`.
+  Bookkeeping is enqueued on a serial queue instead of awaited in the hook, so Prisma batch
+  transactions cannot deadlock. Sessions, invitations, audit logs, time entries, invoices and
+  documents stay device-local.
+- Payloads are JSON text (portable between SQLite and Postgres); user payloads never include
+  `passwordHash` or `twoFactorSecret`, and mirrored accounts get an unusable local hash.
+- `/api/sync/push` (idempotent by operation id, server-wins conflicts), `/api/sync/pull`
+  (per-firm, excludes the caller's device, `since` cursor), `/api/sync/status`, `/api/sync/run`.
+  Session auth or an `x-sync-secret` peer header; secret-authenticated calls must name a firm.
+- Bootstrap: the first pass pushes a full parent-first snapshot; later passes push the outbox
+  and pull the feed. A `retry` result holds the cursor so a child whose parent has not arrived
+  is never dropped.
+- Background worker (`src/instrumentation.ts` → `src/lib/sync/worker.ts`) with exponential
+  backoff (15 s → 5 min) and `lastError` persisted on the cursor.
+- Sidebar `SyncStatus` chip: offline/synced/pending/error, conflict count, last sync time,
+  device id and **Sync now**.
+- Desktop wiring: stable per-install `deviceId`, `sync.secret`, and
+  `LEX_SYNC_ENABLED`/`LEX_SYNC_ENDPOINT`/`LEX_SYNC_SECRET`/`LEX_DEVICE_ID` in the embedded
+  server env; changing sync settings via IPC restarts the backend in packaged builds.
+- `npm run sync:smoke`: seeded client + empty local sync server, bootstrap, peer edit pull,
+  server-wins conflict (recorded, not silent), offline error, app still usable.
+- Verified: typecheck, 71 tests across 12 files, production build, `sync:smoke` 19/19.
+
+### Done — Phase 3 (in-app desktop settings)
+
+- `/settings/desktop` (`src/components/desktop-settings.tsx`), linked from **Settings** and the
+  **Environment → Desktop settings…** menu. It talks only to the preload bridge; in a browser
+  deployment it explains that the controls are desktop-only instead of failing.
+- **Repository**: Demo / Live cards show which one is active, where its database lives, and
+  switch via `desktop:set-environment`. Both databases stay on disk; the packaged app restarts
+  its local server and reopens at sign-in. Dev mode reports that a restart is required.
+- **Sync**: Offline / Online switch, endpoint field, peer secret field (write-only: the IPC
+  state exposes `hasSecret`, never the value), "forget saved secret", and a Save that restarts
+  the backend with the new `LEX_SYNC_*` environment.
+- **This installation**: version, database path, backup folder, device id, open data folder.
+- **Reset demo data**: only enabled in the Demo repository and only in the packaged app. The
+  local server is stopped first, `desktop/backup.mjs` copies the SQLite file into
+  `data/demo/backups/lex-indiana-<timestamp>.db`, then the database, journal files, uploads and
+  seed marker are removed and the demo seed runs again. The backup path is shown afterwards.
+  The Live repository is never reset from this page.
+- Verified: typecheck, production build, `desktop:smoke` 19/19 (adds settings route render and
+  backup-before-clear checks).
+
 ### Not yet built
 
-- **Phase 2 — sync**: `SyncOperation`/`SyncCursor`/`SyncConflict`/tombstones, Prisma change
-  capture extension, `/api/sync/push|pull|status`, worker + status chip. The desktop menu
-  item and config fields exist but are inert.
-- **Phase 3 — settings UI**: in-app environment/sync panel, reset-demo-with-backup, backups.
+- **Conflict review UI**: conflicts are recorded and counted, but the keep-mine/keep-theirs
+  screen is not built.
+- **Scheduled backups**: backups are created before a demo reset only; no automatic cadence.
 - **Phase 4 — integration interfaces**: `src/lib/integrations/` provider contracts.
 - **Verification gap**: the Electron binary could not be downloaded in the build sandbox and
   there is no display, so the GUI window and the packaged installer are **untested**. The

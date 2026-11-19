@@ -14,6 +14,10 @@ export default async function setup(): Promise<void> {
 
   const prisma = new PrismaClient({ datasources: { db: { url: testDatabaseUrl } } });
   // SQLite has no TRUNCATE; deleting the tenants cascades to every child row.
+  // Sync bookkeeping has no foreign keys, so it is cleared explicitly.
+  for (const table of ["SyncOperation", "SyncCursor", "SyncTombstone", "SyncConflict"]) {
+    await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
+  }
   await prisma.$executeRawUnsafe('DELETE FROM "Firm"');
   await prisma.$executeRawUnsafe('DELETE FROM "User"');
   await prisma.$disconnect();
