@@ -15,8 +15,10 @@ if (!appDir) {
 }
 
 const required = [
+  "package.json",
   "desktop/main.mjs",
   "desktop/server.mjs",
+  "desktop/preload.cjs",
   "desktop/build/seed-haynes.mjs",
   "next.config.mjs",
   ".next/BUILD_ID",
@@ -35,7 +37,9 @@ const problems = required
 // hard-coding the Linux or Windows file.
 const engineDir = path.join(appDir, "node_modules", ".prisma", "client");
 const engines = existsSync(engineDir)
-  ? readdirSync(engineDir).filter((file) => /^(libquery_engine-.+\.so\.node|query_engine-.+\.dll\.node)$/.test(file))
+  ? readdirSync(engineDir).filter((file) =>
+      /^(libquery_engine-.+\.(so|dylib)\.node|query_engine-.+\.dll\.node)$/.test(file),
+    )
   : [];
 if (engines.length === 0) problems.push("missing the Prisma query engine in node_modules/.prisma/client");
 

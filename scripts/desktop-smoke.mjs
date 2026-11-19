@@ -77,7 +77,9 @@ try {
     port,
     authSecret: config.authSecret,
   });
-  check("demo database URL points into the demo repository", env.DATABASE_URL.includes(`${path.sep}demo${path.sep}`));
+  // databaseUrl is normalised to forward slashes for Prisma on Windows too, so
+  // this must not be built from path.sep.
+  check("demo database URL points into the demo repository", env.DATABASE_URL.includes("/demo/"));
 
   const paths = await migrateEnvironment({
     appRoot,

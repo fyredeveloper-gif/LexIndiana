@@ -1,13 +1,35 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
+// Matches directories.output in electron-builder.yml.
+const RELEASE_DIR = "release";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const npx = process.platform === "win32" ? "npx.cmd" : "npx";
 const windows = process.platform === "win32";
 
 function run(command, args) {
   execFileSync(command, args, { stdio: "inherit", shell: windows });
+}
+
+/**
+ * Unpacked app trees are release/<os>-unpacked/resources/app for win/linux and
+ * release/mac[-arch]/<Product>.app/Contents/Resources/app for mac, so walk the
+ * output directory rather than guessing the folder name.
+ */
+function findPackagedApps(dir, depth = 0) {
+  if (depth > 6 || !existsSync(dir)) return [];
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.name === "app" && path.basename(dir).toLowerCase() === "resources") {
+      found.push(full);
+      continue;
+    }
+    found.push(...findPackagedApps(full, depth + 1));
+  }
+  return found;
 }
 
 console.log("[desktop:build] bundling demo seed");
@@ -26,3 +48,16 @@ if (!existsSync(path.join("node_modules", "electron", "path.txt"))) {
 
 console.log("[desktop:build] packaging");
 run(npx, ["electron-builder", "--config", "electron-builder.yml", ...process.argv.slice(2)]);
+
+// electron-builder exits 0 even when it leaves Prisma's generated client out of
+// the app tree, which only surfaces when someone launches the app. Check every
+// unpacked tree it produced so local packaging fails here instead.
+const packaged = findPackagedApps(RELEASE_DIR);
+if (packaged.length === 0) {
+  console.error(`[desktop:build] no unpacked app tree found under ${RELEASE_DIR}/`);
+  process.exit(1);
+}
+for (const appDir of packaged) {
+  console.log(`[desktop:build] checking ${appDir}`);
+  run(process.execPath, [path.join("scripts", "desktop-package-check.mjs"), appDir]);
+}
