@@ -1,14 +1,19 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { PrismaClient } from "@prisma/client";
 import os from "node:os";
 import path from "node:path";
 import { backupDatabase, clearEnvironmentData } from "../desktop/backup.mjs";
 import { readConfig } from "../desktop/config.mjs";
 import { environmentPaths } from "../desktop/paths.mjs";
-import { demoPassword, DEMO_EMAIL, desktopServerEnv } from "../desktop/runtime.mjs";
+import { desktopServerEnv } from "../desktop/runtime.mjs";
 import { migrateEnvironment, seedDemoIfNeeded } from "../desktop/tasks.mjs";
+import {
+  createChecker,
+  freePort,
+  signInAsDemo,
+  startDesktopServer,
+  waitFor,
+} from "./desktop-smoke-utils.mjs";
 
 /**
  * Verifies everything the Electron shell does except opening a window:
@@ -22,48 +27,10 @@ import { migrateEnvironment, seedDemoIfNeeded } from "../desktop/tasks.mjs";
  */
 const appRoot = process.cwd();
 const userDataDir = mkdtempSync(path.join(os.tmpdir(), "lex-desktop-smoke-"));
-/** @type {import("node:child_process").ChildProcess | null} */
+/** @type {ReturnType<typeof startDesktopServer> | null} */
 let server = null;
-let failures = 0;
-
-function check(label, condition, detail = "") {
-  if (condition) {
-    console.log(`PASS  ${label}`);
-  } else {
-    failures += 1;
-    console.error(`FAIL  ${label}${detail ? ` — ${detail}` : ""}`);
-  }
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (!address || typeof address === "string") {
-        probe.close();
-        reject(new Error("Could not allocate a port."));
-        return;
-      }
-      probe.close((error) => (error ? reject(error) : resolve(address.port)));
-    });
-  });
-}
-
-async function waitFor(url, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, { redirect: "manual" });
-      if (response.status < 500) return true;
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
-}
+const checker = createChecker();
+const { check } = checker;
 
 try {
   const config = readConfig(userDataDir);
@@ -113,42 +80,26 @@ try {
     rmSync(scratchDir, { recursive: true, force: true });
   }
 
-  server = spawn(process.execPath, [path.join("desktop", "server.mjs")], {
-    cwd: appRoot,
-    env: { ...process.env, ...env, LEX_APP_ROOT: appRoot, LEX_PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let serverLog = "";
-  server.stdout?.on("data", (chunk) => {
-    serverLog += chunk.toString();
-  });
-  server.stderr?.on("data", (chunk) => {
-    serverLog += chunk.toString();
-  });
+  server = startDesktopServer({ appDir: appRoot, env, port });
 
   const ready = await waitFor(`http://127.0.0.1:${port}/login`);
-  check("embedded Next server answers /login", ready, serverLog.slice(-500));
+  check("embedded Next server answers /login", ready, server.log().slice(-500));
 
-  const login = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: DEMO_EMAIL, password: demoPassword() }),
-  });
+  const login = await signInAsDemo(`http://127.0.0.1:${port}`);
   check("demo account can sign in", login.status === 200, `status ${login.status}`);
 
-  const cookie = (login.headers.getSetCookie?.() ?? []).map((entry) => entry.split(";")[0]).join("; ");
-  const tasks = await fetch(`http://127.0.0.1:${port}/tasks`, { headers: { cookie } });
+  const tasks = await fetch(`http://127.0.0.1:${port}/tasks`, { headers: { cookie: login.cookie } });
   const tasksHtml = await tasks.text();
   check("tasks page renders for the demo user", tasks.status === 200);
   check("tasks page shows seeded work", /deposition|discovery|inventory/i.test(tasksHtml));
 
-  const calendar = await fetch(`http://127.0.0.1:${port}/calendar`, { headers: { cookie } });
+  const calendar = await fetch(`http://127.0.0.1:${port}/calendar`, { headers: { cookie: login.cookie } });
   check("calendar page renders", calendar.status === 200);
 
   check(
     "server switches the demo database to WAL",
-    /\[db\] sqlite journal_mode=wal/.test(serverLog),
-    serverLog.slice(-500),
+    /\[db\] sqlite journal_mode=wal/.test(server.log()),
+    server.log().slice(-500),
   );
   const probe = new PrismaClient({ datasources: { db: { url: `file:${paths.dbFile}` } } });
   try {
@@ -158,7 +109,9 @@ try {
     await probe.$disconnect();
   }
 
-  const desktopSettings = await fetch(`http://127.0.0.1:${port}/settings/desktop`, { headers: { cookie } });
+  const desktopSettings = await fetch(`http://127.0.0.1:${port}/settings/desktop`, {
+    headers: { cookie: login.cookie },
+  });
   check("desktop settings page renders", desktopSettings.status === 200, `status ${desktopSettings.status}`);
   const desktopSettingsHtml = await desktopSettings.text();
   check("desktop settings page is the desktop panel route", /Desktop settings/i.test(desktopSettingsHtml));
@@ -175,22 +128,15 @@ try {
   check("LIVE and DEMO files are different", live.dbFile !== paths.dbFile);
   check("demo data survived creating the live repository", existsSync(paths.dbFile));
 } catch (error) {
-  failures += 1;
-  console.error("FAIL  smoke run threw:", error instanceof Error ? error.message : error);
+  checker.fail(`smoke run threw: ${error instanceof Error ? error.message : error}`);
 } finally {
-  if (server?.pid) {
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/PID", String(server.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    } else {
-      server.kill("SIGTERM");
-    }
-  }
+  server?.stop();
   await new Promise((resolve) => setTimeout(resolve, 800));
   rmSync(userDataDir, { recursive: true, force: true });
 }
 
-if (failures > 0) {
-  console.error(`\n${failures} desktop smoke check(s) failed.`);
+if (checker.failures > 0) {
+  console.error(`\n${checker.failures} desktop smoke check(s) failed.`);
   process.exit(1);
 }
 console.log("\nDesktop smoke checks passed.");
