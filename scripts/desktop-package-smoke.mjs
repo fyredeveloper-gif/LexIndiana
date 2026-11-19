@@ -87,7 +87,7 @@ try {
     server.log().slice(-800),
   );
 } catch (error) {
-  checker.fail(`package smoke threw: ${error instanceof Error ? error.message : error}`);
+  check(`package smoke threw: ${error instanceof Error ? error.message : error}`, false);
 } finally {
   server?.stop();
   await new Promise((resolve) => setTimeout(resolve, 800));

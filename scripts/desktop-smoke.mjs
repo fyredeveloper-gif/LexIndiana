@@ -128,7 +128,7 @@ try {
   check("LIVE and DEMO files are different", live.dbFile !== paths.dbFile);
   check("demo data survived creating the live repository", existsSync(paths.dbFile));
 } catch (error) {
-  checker.fail(`smoke run threw: ${error instanceof Error ? error.message : error}`);
+  check(`smoke run threw: ${error instanceof Error ? error.message : error}`, false);
 } finally {
   server?.stop();
   await new Promise((resolve) => setTimeout(resolve, 800));

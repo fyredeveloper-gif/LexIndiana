@@ -21,10 +21,6 @@ export function createChecker() {
         console.error(`FAIL  ${label}${detail ? ` — ${detail}` : ""}`);
       }
     },
-    fail(message) {
-      failures += 1;
-      console.error(`FAIL  ${message}`);
-    },
     get failures() {
       return failures;
     },
@@ -73,6 +69,7 @@ export function startDesktopServer({ appDir, env, port }) {
     windowsHide: true,
   });
   let log = "";
+  let stopped = false;
   child.stdout?.on("data", (chunk) => {
     log += chunk.toString();
   });
@@ -80,10 +77,12 @@ export function startDesktopServer({ appDir, env, port }) {
     log += chunk.toString();
   });
   return {
-    child,
     log: () => log,
+    /** Idempotent, so a check that stops the server early can still run the
+     * shared cleanup in `finally`. */
     stop() {
-      if (!child.pid) return;
+      if (stopped || !child.pid) return;
+      stopped = true;
       if (process.platform === "win32") {
         spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
       } else {

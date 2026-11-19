@@ -1,12 +1,11 @@
-import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { readConfig } from "../desktop/config.mjs";
 import { desktopServerEnv } from "../desktop/runtime.mjs";
 import { migrateEnvironment, seedDemoIfNeeded } from "../desktop/tasks.mjs";
+import { createChecker, freePort, startDesktopServer, waitFor } from "./desktop-smoke-utils.mjs";
 
 /**
  * Phase 2 sync smoke test against a real second instance:
@@ -21,63 +20,15 @@ const appRoot = process.cwd();
 const serverDir = mkdtempSync(path.join(os.tmpdir(), "lex-sync-server-"));
 const clientDir = mkdtempSync(path.join(os.tmpdir(), "lex-sync-client-"));
 const secret = randomBytes(24).toString("base64url");
+const checker = createChecker();
+const { check } = checker;
+/** @type {ReturnType<typeof startDesktopServer>[]} */
 const children = [];
-let failures = 0;
 
-function check(label, condition, detail = "") {
-  if (condition) {
-    console.log(`PASS  ${label}`);
-  } else {
-    failures += 1;
-    console.error(`FAIL  ${label}${detail ? ` — ${detail}` : ""}`);
-  }
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (!address || typeof address === "string") {
-        probe.close();
-        reject(new Error("Could not allocate a port."));
-        return;
-      }
-      probe.close((error) => (error ? reject(error) : resolve(address.port)));
-    });
-  });
-}
-
-async function waitFor(url, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, { redirect: "manual" });
-      if (response.status < 500) return true;
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
-}
-
-function startApp(name, userDataDir, port, env) {
-  const child = spawn(process.execPath, [path.join("desktop", "server.mjs")], {
-    cwd: appRoot,
-    env: { ...process.env, ...env, LEX_APP_ROOT: appRoot, LEX_PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.log = "";
-  child.stdout?.on("data", (chunk) => {
-    child.log += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk) => {
-    child.log += chunk.toString();
-  });
-  children.push(child);
-  return child;
+function startApp(userDataDir, port, env) {
+  const app = startDesktopServer({ appDir: appRoot, env, port });
+  children.push(app);
+  return app;
 }
 
 async function json(url, init = {}) {
@@ -134,8 +85,8 @@ try {
   const seed = await seedDemoIfNeeded({ appRoot, paths: clientPaths, baseEnv: clientEnv });
   check("demo client seeded before syncing", seed.seeded);
 
-  startApp("server", serverDir, serverPort, { ...serverEnv, SYNC_SECRET: secret });
-  startApp("client", clientDir, clientPort, clientEnv);
+  startApp(serverDir, serverPort, { ...serverEnv, SYNC_SECRET: secret });
+  startApp(clientDir, clientPort, clientEnv);
 
   check("demo sync server answers", await waitFor(`http://127.0.0.1:${serverPort}/login`));
   check("desktop client answers", await waitFor(`http://127.0.0.1:${clientPort}/login`));
@@ -271,8 +222,7 @@ try {
   check("losing local edit is recorded as a conflict", (conflictStatus.body?.conflicts ?? 0) >= 1);
 
   // 4. Offline behaviour
-  const serverChild = children[0];
-  serverChild.kill("SIGTERM");
+  children[0].stop();
   await new Promise((resolve) => setTimeout(resolve, 1_200));
 
   const offlineRun = await json(`http://127.0.0.1:${clientPort}/api/sync/run`, {
@@ -290,25 +240,16 @@ try {
   const stillWorks = await fetch(`http://127.0.0.1:${clientPort}/tasks`, { headers: { cookie } });
   check("app keeps working offline", stillWorks.status === 200, `status ${stillWorks.status}`);
 } catch (error) {
-  failures += 1;
-  console.error("FAIL  sync smoke threw:", error instanceof Error ? error.message : error);
+  check(`sync smoke threw: ${error instanceof Error ? error.message : error}`, false);
 } finally {
-  for (const child of children) {
-    if (child.pid && child.exitCode === null) {
-      if (process.platform === "win32") {
-        spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-      } else {
-        child.kill("SIGTERM");
-      }
-    }
-  }
+  for (const app of children) app.stop();
   await new Promise((resolve) => setTimeout(resolve, 1_000));
   rmSync(serverDir, { recursive: true, force: true });
   rmSync(clientDir, { recursive: true, force: true });
 }
 
-if (failures > 0) {
-  console.error(`\n${failures} sync smoke check(s) failed.`);
+if (checker.failures > 0) {
+  console.error(`\n${checker.failures} sync smoke check(s) failed.`);
   process.exit(1);
 }
 console.log("\nSync smoke checks passed.");
