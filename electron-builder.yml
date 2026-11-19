@@ -23,12 +23,24 @@ files:
 
 # Runtime assets copied next to desktop/ (appRoot = resources/app).
 extraResources:
+  # Prisma generates its client (and query engine binary) into node_modules/.prisma.
+  # That directory is not a package, so electron-builder's dependency walk skips
+  # it and a `files` pattern cannot reach it; without this the packaged app dies
+  # on startup with "Cannot find module '.prisma/client/default'".
+  - from: node_modules/.prisma
+    to: app/node_modules/.prisma
   - from: .next
     to: app/.next
   - from: public
     to: app/public
+  # Migrations and schema only: a local dev database must never ship.
   - from: prisma
     to: app/prisma
+    filter:
+      - "**/*"
+      - "!*.db"
+      - "!*.db-wal"
+      - "!*.db-shm"
 
 extraMetadata:
   main: desktop/main.mjs
