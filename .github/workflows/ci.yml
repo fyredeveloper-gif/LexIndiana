@@ -62,3 +62,50 @@ jobs:
 
       - name: Sync smoke (bootstrap, peer edit, conflict, offline)
         run: npm run sync:smoke
+
+  # Packaging is the one desktop path the Linux job cannot cover: the app is
+  # assembled for Windows, so the files that only exist there (Prisma's Windows
+  # query engine among them) are exercised on a runner like the users' machines.
+  # --dir stops at the unpacked app, so no installer build and no signing.
+  package-windows:
+    name: Windows packaging (electron-builder --dir)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      DATABASE_URL: file:./dev.db
+      AUTH_SECRET: ci-only-secret-at-least-32-characters-long
+      APP_URL: http://127.0.0.1:3000
+      STORAGE_DRIVER: local
+      NEXT_TELEMETRY_DISABLED: "1"
+      # No signing certificate exists on CI, and --dir signs nothing anyway.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm run build` also regenerates the Prisma client, which is what makes
+      # the Windows query engine present to be packaged.
+      - name: Production build
+        run: npm run build
+
+      - name: Bundle demo seed
+        run: npm run desktop:seed:bundle
+
+      - name: Package unpacked app (win x64)
+        run: npx electron-builder --dir --win --x64 --config electron-builder.yml
+
+      # Guards the failure this job exists for: a packaging run that succeeds
+      # while the app tree is missing Prisma's generated client.
+      - name: Verify packaged app layout
+        run: node scripts/desktop-package-check.mjs release/win-unpacked/resources/app
