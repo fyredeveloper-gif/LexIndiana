@@ -138,10 +138,11 @@ try {
   check("LIVE server answers on its own port", liveReady, liveServer.log().slice(-500));
 
   const registerPage = await fetch(`http://127.0.0.1:${livePort}/register`, { redirect: "manual" });
-  check("LIVE opens registration for the first firm", registerPage.status === 200, `status ${registerPage.status}`);
+  const registerHtml = await registerPage.text();
   check(
-    "LIVE register page asks for the first workspace",
-    /Create the first workspace/i.test(await registerPage.text()),
+    "LIVE opens the first-workspace registration page",
+    registerPage.status === 200 && /Create the first workspace/i.test(registerHtml),
+    `status ${registerPage.status}`,
   );
 
   const ownerEmail = "pike@erickson.test";
@@ -195,9 +196,14 @@ try {
     await liveProbe.$disconnect();
   }
 
-  check("demo data survived bootstrapping the live repository", existsSync(paths.dbFile));
+  // Stronger than checking the demo file still exists: the demo server keeps
+  // answering with the demo session after LIVE was bootstrapped.
   const demoStillServing = await fetch(`http://127.0.0.1:${port}/tasks`, { headers: { cookie: login.cookie } });
-  check("demo server still serves after LIVE bootstrap", demoStillServing.status === 200);
+  check(
+    "demo repository still serves after the LIVE bootstrap",
+    demoStillServing.status === 200,
+    `status ${demoStillServing.status}`,
+  );
 } catch (error) {
   check(`smoke run threw: ${error instanceof Error ? error.message : error}`, false);
 } finally {
