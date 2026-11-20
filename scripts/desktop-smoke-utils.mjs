@@ -92,15 +92,20 @@ export function startDesktopServer({ appDir, env, port }) {
   };
 }
 
-/** Signs in as the seeded demo account and returns its session cookie. */
-export async function signInAsDemo(baseUrl) {
+/** Signs in and returns the session cookie as a request header value. */
+export async function signIn(baseUrl, email, password) {
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: DEMO_EMAIL, password: demoPassword() }),
+    body: JSON.stringify({ email, password }),
   });
   const cookie = (response.headers.getSetCookie?.() ?? [])
     .map((entry) => entry.split(";")[0])
     .join("; ");
   return { status: response.status, cookie };
+}
+
+/** Signs in as the seeded demo account. */
+export function signInAsDemo(baseUrl) {
+  return signIn(baseUrl, DEMO_EMAIL, demoPassword());
 }

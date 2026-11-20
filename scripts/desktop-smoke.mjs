@@ -10,6 +10,7 @@ import { migrateEnvironment, seedDemoIfNeeded } from "../desktop/tasks.mjs";
 import {
   createChecker,
   freePort,
+  signIn,
   signInAsDemo,
   startDesktopServer,
   waitFor,
@@ -29,6 +30,8 @@ const appRoot = process.cwd();
 const userDataDir = mkdtempSync(path.join(os.tmpdir(), "lex-desktop-smoke-"));
 /** @type {ReturnType<typeof startDesktopServer> | null} */
 let server = null;
+/** @type {ReturnType<typeof startDesktopServer> | null} */
+let liveServer = null;
 const checker = createChecker();
 const { check } = checker;
 
@@ -116,20 +119,82 @@ try {
   const desktopSettingsHtml = await desktopSettings.text();
   check("desktop settings page is the desktop panel route", /Desktop settings/i.test(desktopSettingsHtml));
 
+  // LIVE is the repository a real install uses, so boot it and go through the
+  // first-owner bootstrap rather than only checking the file appeared.
+  const livePort = await freePort();
   const liveEnv = desktopServerEnv({
     userDataDir,
     environment: "live",
-    port,
+    port: livePort,
     authSecret: config.authSecret,
   });
   await migrateEnvironment({ appRoot, userDataDir, environment: "live", baseEnv: liveEnv });
   const live = environmentPaths(userDataDir, "live");
   check("LIVE repository has its own database file", existsSync(live.dbFile));
   check("LIVE and DEMO files are different", live.dbFile !== paths.dbFile);
-  check("demo data survived creating the live repository", existsSync(paths.dbFile));
+
+  liveServer = startDesktopServer({ appDir: appRoot, env: liveEnv, port: livePort });
+  const liveReady = await waitFor(`http://127.0.0.1:${livePort}/login`, 120_000);
+  check("LIVE server answers on its own port", liveReady, liveServer.log().slice(-500));
+
+  const registerPage = await fetch(`http://127.0.0.1:${livePort}/register`, { redirect: "manual" });
+  check("LIVE opens registration for the first firm", registerPage.status === 200, `status ${registerPage.status}`);
+  check(
+    "LIVE register page asks for the first workspace",
+    /Create the first workspace/i.test(await registerPage.text()),
+  );
+
+  const ownerEmail = "pike@erickson.test";
+  const ownerPassword = "EricksonPike2026!";
+  const register = await fetch(`http://127.0.0.1:${livePort}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Marta Pike",
+      firmName: "Erickson & Pike LLP",
+      email: ownerEmail,
+      password: ownerPassword,
+    }),
+  });
+  check("LIVE bootstraps the first firm and owner", register.status === 201, `status ${register.status}`);
+
+  const secondRegister = await fetch(`http://127.0.0.1:${livePort}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Second Owner",
+      firmName: "Another Firm LLP",
+      email: "second@erickson.test",
+      password: ownerPassword,
+    }),
+  });
+  check("LIVE closes bootstrap after the first firm", secondRegister.status === 403, `status ${secondRegister.status}`);
+
+  const liveSession = await signIn(`http://127.0.0.1:${livePort}`, ownerEmail, ownerPassword);
+  check("bootstrap owner can sign in to LIVE", liveSession.status === 200, `status ${liveSession.status}`);
+
+  const liveTasks = await fetch(`http://127.0.0.1:${livePort}/tasks`, {
+    headers: { cookie: liveSession.cookie },
+  });
+  check("LIVE workspace renders for the new owner", liveTasks.status === 200, `status ${liveTasks.status}`);
+
+  const liveProbe = new PrismaClient({ datasources: { db: { url: live.databaseUrl } } });
+  try {
+    const [firms] = await liveProbe.$queryRawUnsafe('select count(*) as count from "Firm"');
+    const [liveTaskCount] = await liveProbe.$queryRawUnsafe('select count(*) as count from "Task"');
+    check("LIVE holds exactly the bootstrapped firm", Number(firms?.count) === 1);
+    check("LIVE received none of the demo seed", Number(liveTaskCount?.count) === 0);
+  } finally {
+    await liveProbe.$disconnect();
+  }
+
+  check("demo data survived bootstrapping the live repository", existsSync(paths.dbFile));
+  const demoStillServing = await fetch(`http://127.0.0.1:${port}/tasks`, { headers: { cookie: login.cookie } });
+  check("demo server still serves after LIVE bootstrap", demoStillServing.status === 200);
 } catch (error) {
   check(`smoke run threw: ${error instanceof Error ? error.message : error}`, false);
 } finally {
+  liveServer?.stop();
   server?.stop();
   await new Promise((resolve) => setTimeout(resolve, 800));
   rmSync(userDataDir, { recursive: true, force: true });
