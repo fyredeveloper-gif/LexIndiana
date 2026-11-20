@@ -170,6 +170,13 @@ try {
   });
   check("LIVE closes bootstrap after the first firm", secondRegister.status === 403, `status ${secondRegister.status}`);
 
+  const closedRegisterPage = await fetch(`http://127.0.0.1:${livePort}/register`, { redirect: "manual" });
+  check(
+    "LIVE register page is gone once bootstrap closes",
+    closedRegisterPage.status === 404,
+    `status ${closedRegisterPage.status}`,
+  );
+
   const liveSession = await signIn(`http://127.0.0.1:${livePort}`, ownerEmail, ownerPassword);
   check("bootstrap owner can sign in to LIVE", liveSession.status === 200, `status ${liveSession.status}`);
 
