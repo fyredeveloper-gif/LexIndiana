@@ -327,6 +327,27 @@ the two Postgres-only constructs, `tests/global-setup.ts`, `package.json`, `READ
 - Verified: typecheck, production build, `desktop:smoke` 19/19 (adds settings route render and
   backup-before-clear checks).
 
+### Producing a Windows build
+
+On a Windows machine, the full path from a clean checkout:
+
+```powershell
+npm ci
+npm run desktop:seed:bundle
+npm run desktop:build -- --dir
+```
+
+`desktop:build` runs the Next build, electron-builder, then the layout check and the packaged
+smoke against `release/win-unpacked/resources/app`, so a broken package fails the command
+instead of shipping. Drop `--dir` for the NSIS installer and portable exe.
+
+Without a Windows machine — or without opening a pull request — use the manual workflow:
+**Actions → CI → Run workflow**, choose the branch, and tick **Skip the Linux verify job and
+only build the Windows artifact**. The `package-windows` job builds with
+`electron-builder --dir --win --x64`, verifies the layout, smokes the packaged app and uploads
+`lex-indiana-windows-unpacked` (kept 7 days). Unzip it and run `Lex Indiana.exe`: there is no
+installer and no certificate, so Windows may show a SmartScreen prompt for the unsigned build.
+
 ### Not yet built
 
 - **Conflict review UI**: conflicts are recorded and counted, but the keep-mine/keep-theirs
