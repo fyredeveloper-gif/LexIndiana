@@ -333,13 +333,12 @@ On a Windows machine, the full path from a clean checkout:
 
 ```powershell
 npm ci
-npm run desktop:seed:bundle
 npm run desktop:build -- --dir
 ```
 
-`desktop:build` runs the Next build, electron-builder, then the layout check and the packaged
-smoke against `release/win-unpacked/resources/app`, so a broken package fails the command
-instead of shipping. Drop `--dir` for the NSIS installer and portable exe.
+`desktop:build` bundles the demo seed, runs the Next build and electron-builder, then the
+layout check and the packaged smoke against `release/win-unpacked/resources/app`, so a broken
+package fails the command instead of shipping. Drop `--dir` for the NSIS installer and portable exe.
 
 Without a Windows machine — or without opening a pull request — use the manual workflow:
 **Actions → CI → Run workflow**, choose the branch, and tick **Skip the Linux verify job and
