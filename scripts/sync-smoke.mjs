@@ -5,7 +5,7 @@ import path from "node:path";
 import { readConfig } from "../desktop/config.mjs";
 import { desktopServerEnv } from "../desktop/runtime.mjs";
 import { migrateEnvironment, seedDemoIfNeeded } from "../desktop/tasks.mjs";
-import { createChecker, freePort, startDesktopServer, waitFor } from "./desktop-smoke-utils.mjs";
+import { createChecker, freePort, signInAsDemo, startDesktopServer, waitFor } from "./desktop-smoke-utils.mjs";
 
 /**
  * Phase 2 sync smoke test against a real second instance:
@@ -91,13 +91,9 @@ try {
   check("demo sync server answers", await waitFor(`http://127.0.0.1:${serverPort}/login`));
   check("desktop client answers", await waitFor(`http://127.0.0.1:${clientPort}/login`));
 
-  const login = await fetch(`http://127.0.0.1:${clientPort}/api/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "quentin@lexindiana.test", password: "IndianaLaw2026!" }),
-  });
+  const login = await signInAsDemo(`http://127.0.0.1:${clientPort}`);
   check("demo account signs in", login.status === 200, `status ${login.status}`);
-  const cookie = (login.headers.getSetCookie?.() ?? []).map((entry) => entry.split(";")[0]).join("; ");
+  const cookie = login.cookie;
 
   const status = await json(`http://127.0.0.1:${clientPort}/api/sync/status`, {
     headers: authed(cookie),
