@@ -159,25 +159,8 @@ try {
   });
   check("LIVE bootstraps the first firm and owner", register.status === 201, `status ${register.status}`);
 
-  const secondRegister = await fetch(`http://127.0.0.1:${livePort}/api/auth/register`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      name: "Second Owner",
-      firmName: "Another Firm LLP",
-      email: "second@erickson.test",
-      password: ownerPassword,
-    }),
-  });
-  check("LIVE closes bootstrap after the first firm", secondRegister.status === 403, `status ${secondRegister.status}`);
-
-  const closedRegisterPage = await fetch(`http://127.0.0.1:${livePort}/register`, { redirect: "manual" });
-  check(
-    "LIVE register page is gone once bootstrap closes",
-    closedRegisterPage.status === 404,
-    `status ${closedRegisterPage.status}`,
-  );
-
+  // The closed gate itself (403/404 after the first firm) is covered by
+  // tests/e2e-auth.test.ts; only the desktop LIVE environment is proven here.
   const liveSession = await signIn(`http://127.0.0.1:${livePort}`, ownerEmail, ownerPassword);
   check("bootstrap owner can sign in to LIVE", liveSession.status === 200, `status ${liveSession.status}`);
 
