@@ -324,7 +324,7 @@ the two Postgres-only constructs, `tests/global-setup.ts`, `package.json`, `READ
   `data/demo/backups/lex-indiana-<timestamp>.db`, then the database, journal files, uploads and
   seed marker are removed and the demo seed runs again. The backup path is shown afterwards.
   The Live repository is never reset from this page.
-- Verified: typecheck, production build, `desktop:smoke` 30/30 (adds the LIVE bootstrap and
+- Verified: typecheck, production build, `desktop:smoke` 28/28 (adds the LIVE bootstrap and
   sign-in, settings route render, and backup-before-clear checks).
 
 ### Producing a Windows build
