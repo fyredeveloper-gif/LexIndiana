@@ -136,3 +136,7 @@ jobs:
           path: release/win-unpacked
           retention-days: 7
           if-no-files-found: error
+          # The app's .next build and Prisma's generated .prisma client are
+          # dot-directories, and v4 skips hidden files by default -- which
+          # uploads an app that cannot start.
+          include-hidden-files: true
