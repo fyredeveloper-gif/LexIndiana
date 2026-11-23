@@ -118,9 +118,10 @@ jobs:
         run: npx electron-builder --dir --win --x64 --config electron-builder.yml
 
       # Guards the failure this job exists for: a packaging run that succeeds
-      # while the app tree is missing Prisma's generated client.
+      # while the app tree is missing Prisma's generated client, or while it
+      # holds a query engine built for a platform other than Windows.
       - name: Verify packaged app layout
-        run: node scripts/desktop-package-check.mjs release/win-unpacked/resources/app
+        run: node scripts/desktop-package-check.mjs release/win-unpacked/resources/app --platform win32
 
       # A complete layout can still hold a query engine that will not load on
       # Windows, so boot the packaged tree and sign in. No window is opened.
