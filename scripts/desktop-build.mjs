@@ -1,6 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
+import {
+  platformForTree,
+  platformsFromElectronBuilderArgs,
+} from "./packaged-platforms.mjs";
 
 // Matches directories.output in electron-builder.yml.
 const RELEASE_DIR = "release";
@@ -57,7 +61,31 @@ if (packaged.length === 0) {
   console.error(`[desktop:build] no unpacked app tree found under ${RELEASE_DIR}/`);
   process.exit(1);
 }
+// electron-builder targets the host unless its own flags say otherwise, so the
+// target comes from the tree it produced and is cross-checked against what was
+// requested. A `--win` build made on Linux must not be inspected as a Linux
+// package: its query engine would have to be the Windows one.
+const requested = platformsFromElectronBuilderArgs(process.argv.slice(2));
 for (const appDir of packaged) {
-  console.log(`[desktop:build] checking ${appDir}`);
-  run(process.execPath, [path.join("scripts", "desktop-package-check.mjs"), appDir]);
+  const platform = platformForTree(appDir);
+  if (!platform) {
+    console.error(
+      `[desktop:build] cannot infer the target platform of ${appDir}; ` +
+        "pass --platform to scripts/desktop-package-check.mjs",
+    );
+    process.exit(1);
+  }
+  if (requested.length > 0 && !requested.includes(platform)) {
+    console.error(
+      `[desktop:build] ${appDir} targets ${platform}, but the build requested ${requested.join(", ")}`,
+    );
+    process.exit(1);
+  }
+  console.log(`[desktop:build] checking ${appDir} (target ${platform})`);
+  run(process.execPath, [
+    path.join("scripts", "desktop-package-check.mjs"),
+    appDir,
+    "--platform",
+    platform,
+  ]);
 }

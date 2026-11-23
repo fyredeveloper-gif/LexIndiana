@@ -340,6 +340,10 @@ npm run desktop:build -- --dir
 layout check and the packaged smoke against `release/win-unpacked/resources/app`, so a broken
 package fails the command instead of shipping. Drop `--dir` for the NSIS installer and portable exe.
 
+The layout check judges the tree against the platform it was built for, so cross-building a
+`--win` package on macOS or Linux fails unless Prisma's `binaryTargets` also includes `windows`;
+the Windows runner is the supported way to produce that package.
+
 Without a Windows machine — or without opening a pull request — use the manual workflow:
 **Actions → CI → Run workflow**, choose the branch, and tick **Skip the Linux verify job and
 only build the Windows artifact**. The `package-windows` job builds with
