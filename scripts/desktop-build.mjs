@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import {
+  ARCHITECTURES,
+  archForTree,
+  architecturesFromElectronBuilderArgs,
+  normalizeArch,
   platformForTree,
   platformsFromElectronBuilderArgs,
 } from "./packaged-platforms.mjs";
@@ -63,9 +67,12 @@ if (packaged.length === 0) {
 }
 // electron-builder targets the host unless its own flags say otherwise, so the
 // target comes from the tree it produced and is cross-checked against what was
-// requested. A `--win` build made on Linux must not be inspected as a Linux
-// package: its query engine would have to be the Windows one.
-const requested = platformsFromElectronBuilderArgs(process.argv.slice(2));
+// requested. A `--win` build made on Linux, or an arm64 build of an x64 package,
+// must not be inspected as the host's package: its query engine has to load
+// where the app will run.
+const buildArgs = process.argv.slice(2);
+const requestedPlatforms = platformsFromElectronBuilderArgs(buildArgs);
+const requestedArchs = architecturesFromElectronBuilderArgs(buildArgs);
 for (const appDir of packaged) {
   const platform = platformForTree(appDir);
   if (!platform) {
@@ -75,17 +82,41 @@ for (const appDir of packaged) {
     );
     process.exit(1);
   }
-  if (requested.length > 0 && !requested.includes(platform)) {
+  if (requestedPlatforms.length > 0 && !requestedPlatforms.includes(platform)) {
     console.error(
-      `[desktop:build] ${appDir} targets ${platform}, but the build requested ${requested.join(", ")}`,
+      `[desktop:build] ${appDir} targets ${platform}, but the build requested ${requestedPlatforms.join(", ")}`,
     );
     process.exit(1);
   }
-  console.log(`[desktop:build] checking ${appDir} (target ${platform})`);
+
+  // The directory names the architecture only when it is not electron-builder's
+  // default, so a single requested architecture supplies the rest; with several
+  // requested, the unsuffixed tree is the host's default and the check's host
+  // fallback is the answer.
+  const archName = archForTree(appDir);
+  const arch = archName ? normalizeArch(archName) : null;
+  if (archName && !arch) {
+    console.error(
+      `[desktop:build] ${appDir} is named for architecture ${archName}, which is not one of ${ARCHITECTURES.join(", ")}`,
+    );
+    process.exit(1);
+  }
+  if (arch && requestedArchs.length > 0 && !requestedArchs.includes(arch)) {
+    console.error(
+      `[desktop:build] ${appDir} targets ${platform}/${arch}, but the build requested ${requestedArchs.join(", ")}`,
+    );
+    process.exit(1);
+  }
+  const targetArch = arch ?? (requestedArchs.length === 1 ? requestedArchs[0] : null);
+
+  console.log(
+    `[desktop:build] checking ${appDir} (target ${platform}${targetArch ? `/${targetArch}` : ""})`,
+  );
   run(process.execPath, [
     path.join("scripts", "desktop-package-check.mjs"),
     appDir,
     "--platform",
     platform,
+    ...(targetArch ? ["--arch", targetArch] : []),
   ]);
 }
