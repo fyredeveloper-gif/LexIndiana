@@ -82,7 +82,7 @@ jobs:
   # installer and the portable exe -- plus the unpacked tree they are packed
   # from. No signing certificate exists, so the installers are unsigned.
   package-windows:
-    name: Windows packaging (electron-builder --dir)
+    name: Windows packaging (NSIS + portable + unpacked)
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -118,8 +118,11 @@ jobs:
 
       # Builds the NSIS installer and the portable exe from win.target, and the
       # unpacked tree both are packed from, which the next steps inspect.
+      # --publish never: electron-builder treats a CI run as publish-on-draft and
+      # aborts after packaging when no GH_TOKEN exists. Artifacts are the output
+      # here; a release is a deliberate manual step.
       - name: Package app and installers (win x64)
-        run: npx electron-builder --win --x64 --config electron-builder.yml
+        run: npx electron-builder --win --x64 --config electron-builder.yml --publish never
 
       # Guards the failure this job exists for: a packaging run that succeeds
       # while the app tree is missing Prisma's generated client, or while it
