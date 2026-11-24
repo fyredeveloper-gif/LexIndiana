@@ -338,7 +338,25 @@ npm run desktop:build -- --dir
 
 `desktop:build` bundles the demo seed, runs the Next build and electron-builder, then the
 layout check and the packaged smoke against `release/win-unpacked/resources/app`, so a broken
-package fails the command instead of shipping. Drop `--dir` for the NSIS installer and portable exe.
+package fails the command instead of shipping.
+
+`npm run desktop:installer` builds every target in `electron-builder.yml` and then asserts the
+result with `scripts/desktop-installer-check.mjs`, which fails if either download is missing, is
+not a real Windows executable, or is too small to contain the app:
+
+- `release/Lex Indiana Setup <version>.exe` — NSIS installer. Per-user (`perMachine: false`), so it
+  installs to `%LOCALAPPDATA%\Programs\Lex Indiana` with no admin prompt, offers the install folder,
+  and creates a Start-menu shortcut. Uninstalling keeps the data folder.
+- `release/Lex Indiana Portable <version>.exe` — one file, runs without installing.
+- `release/win-unpacked/` — the tree both are packed from; the layout check and the packaged smoke
+  run against `resources/app` inside it.
+
+The exe, shortcut, installer and uninstaller icons all come from `assets/icon.ico`, derived from
+`src/app/icon.svg`. `directories.buildResources` points at `assets/` rather than `build/` because
+`build/` is gitignored Next output, so icons kept there never reach a release. Neither installer is
+code-signed — no certificate is available — so Windows SmartScreen warns on the first run; **More
+info → Run anyway** is the expected path for an internal build. Repositories and uploaded documents
+stay in `%APPDATA%\lex-indiana\data\`, outside the install folder.
 
 The layout check judges the tree against the platform and architecture it was built for
 (`--platform`/`--arch`, or the electron-builder output directory) and matches Prisma's engine
@@ -350,9 +368,10 @@ includes `windows`; the Windows runner is the supported way to produce it.
 Without a Windows machine — or without opening a pull request — use the manual workflow:
 **Actions → CI → Run workflow**, choose the branch, and tick **Skip the Linux verify job and
 only build the Windows artifact**. The `package-windows` job builds with
-`electron-builder --dir --win --x64`, verifies the layout, smokes the packaged app and uploads
-`lex-indiana-windows-unpacked` (kept 7 days). Unzip it and run `Lex Indiana.exe`: there is no
-installer and no certificate, so Windows may show a SmartScreen prompt for the unsigned build.
+`electron-builder --win --x64`, verifies the layout, smokes the packaged app, checks the installers
+and uploads two artifacts (kept 7 days): `lex-indiana-windows-installers` — the setup and portable
+exe to hand to a Windows user — and `lex-indiana-windows-unpacked` (unzip it and run
+`Lex Indiana.exe`). Neither is signed, so Windows shows a SmartScreen prompt on first run.
 
 ### Not yet built
 

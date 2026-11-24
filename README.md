@@ -48,11 +48,18 @@ npm run dev            # http://localhost:3000
 The same codebase runs as an Electron app with its own SQLite repository per environment.
 
 ```bash
-npm run desktop:dev     # next dev + Electron window, hot reload
-npm run desktop:smoke   # verifies migrations, demo seed, embedded server and login
-npm run desktop:build   # Next build + electron-builder (unpacked app in release/)
-npm run sync:smoke      # two instances: bootstrap, peer edit, conflict, offline
+npm run desktop:dev       # next dev + Electron window, hot reload
+npm run desktop:smoke     # verifies migrations, demo seed, embedded server and login
+npm run desktop:build     # Next build + electron-builder (unpacked app in release/)
+npm run desktop:installer # NSIS installer + portable exe in release/, then checks them
+npm run sync:smoke        # two instances: bootstrap, peer edit, conflict, offline
 ```
+
+`desktop:installer` produces `release/Lex Indiana Setup <version>.exe` (per-user install, no admin
+prompt, selectable folder, Start-menu shortcut) and `release/Lex Indiana Portable <version>.exe`
+(runs without installing). Neither is code-signed, so Windows SmartScreen warns on first launch.
+Both share the data folder, so a portable run and an installed run see the same repositories.
+The app icon is `assets/icon.ico`, derived from the mark in `src/app/icon.svg`.
 
 Sync is off until a target is configured. Point a desktop build at a demo sync server with
 `LEX_SYNC_ENABLED=1`, `LEX_SYNC_ENDPOINT=http://127.0.0.1:<port>`, `LEX_SYNC_SECRET` set to

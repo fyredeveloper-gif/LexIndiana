@@ -26,6 +26,7 @@
     "db:studio": "prisma studio",
     "desktop:dev": "node scripts/desktop-dev.mjs",
     "desktop:build": "node scripts/desktop-build.mjs",
+    "desktop:installer": "node scripts/desktop-build.mjs --win --x64 && node scripts/desktop-installer-check.mjs release",
     "desktop:server": "node desktop/server.mjs",
     "desktop:seed:bundle": "node scripts/desktop-seed-bundle.mjs",
     "desktop:smoke": "node scripts/desktop-smoke.mjs",

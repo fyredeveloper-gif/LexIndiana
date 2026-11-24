@@ -78,7 +78,9 @@ jobs:
   # Packaging is the one desktop path the Linux job cannot cover: the app is
   # assembled for Windows, so the files that only exist there (Prisma's Windows
   # query engine among them) are exercised on a runner like the users' machines.
-  # --dir stops at the unpacked app, so no installer build and no signing.
+  # The job builds every target in electron-builder.yml's win list -- the NSIS
+  # installer and the portable exe -- plus the unpacked tree they are packed
+  # from. No signing certificate exists, so the installers are unsigned.
   package-windows:
     name: Windows packaging (electron-builder --dir)
     runs-on: windows-latest
@@ -114,8 +116,10 @@ jobs:
       - name: Bundle demo seed
         run: npm run desktop:seed:bundle
 
-      - name: Package unpacked app (win x64)
-        run: npx electron-builder --dir --win --x64 --config electron-builder.yml
+      # Builds the NSIS installer and the portable exe from win.target, and the
+      # unpacked tree both are packed from, which the next steps inspect.
+      - name: Package app and installers (win x64)
+        run: npx electron-builder --win --x64 --config electron-builder.yml
 
       # Guards the failure this job exists for: a packaging run that succeeds
       # while the app tree is missing Prisma's generated client, or while it
@@ -129,6 +133,22 @@ jobs:
       # Windows, so boot the packaged tree and sign in. No window is opened.
       - name: Smoke the packaged app (migrate, seed, sign in)
         run: node scripts/desktop-package-smoke.mjs release/win-unpacked/resources/app
+
+      # A packaging run can report success while one Windows target's file
+      # overwrote the other's, so assert both installers are real programs.
+      - name: Verify Windows installers
+        run: node scripts/desktop-installer-check.mjs release
+
+      # What a user downloads: "Lex Indiana Setup <version>.exe" installs per
+      # user (no admin prompt), "Lex Indiana Portable <version>.exe" runs without
+      # installing. Both are unsigned, so SmartScreen warns on first run.
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: lex-indiana-windows-installers
+          path: release/*.exe
+          retention-days: 7
+          if-no-files-found: error
 
       # The unpacked app needs no installer or signing, so a Windows PC can
       # unzip this artifact and launch "Lex Indiana.exe" directly.

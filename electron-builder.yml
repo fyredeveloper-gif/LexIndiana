@@ -8,7 +8,10 @@ appId: com.lexindiana.desktop
 productName: Lex Indiana
 directories:
   output: release
-  buildResources: build
+  # Icon sources. Not "build": that directory holds Next and seed build output
+  # and is gitignored, so build resources kept there could never be committed
+  # and every release would silently ship Electron's default icon.
+  buildResources: assets
 asar: false
 npmRebuild: false
 
@@ -53,9 +56,22 @@ win:
     - target: portable
       arch:
         - x64
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  # One source for the exe icon, the Start-menu shortcut, the installer and the
+  # uninstaller. Derived from the app's own mark in src/app/icon.svg.
+  icon: assets/icon.ico
+  # No win.artifactName: nsis and portable both produce .exe, so a shared
+  # template makes one target overwrite the other's file.
 
 nsis:
+  artifactName: ${productName} Setup ${version}.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  shortcutName: Lex Indiana
+  uninstallDisplayName: Lex Indiana ${version}
+  # The SQLite repositories and uploaded documents live in the user's data
+  # folder, not the install folder: uninstalling must not delete a firm's data.
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName} Portable ${version}.${ext}
