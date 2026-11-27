@@ -1,6 +1,6 @@
 {
   "name": "lex-indiana",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Multi-tenant legal practice management and client intake platform for Indiana attorneys",
