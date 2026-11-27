@@ -2,6 +2,10 @@ name: CI
 
 on:
   push:
+    # Branches only: a pushed tag is release.yml's job, and matching tags here
+    # would package Windows twice and upload two copies of every installer.
+    branches:
+      - "**"
   pull_request:
   # Manual runs build the Windows artifact on demand, without a pull request.
   # Set "Windows only" to skip the Linux verify job and package just Windows.
@@ -78,100 +82,12 @@ jobs:
   # Packaging is the one desktop path the Linux job cannot cover: the app is
   # assembled for Windows, so the files that only exist there (Prisma's Windows
   # query engine among them) are exercised on a runner like the users' machines.
-  # The job builds every target in electron-builder.yml's win list -- the NSIS
-  # installer and the portable exe -- plus the unpacked tree they are packed
-  # from. No signing certificate exists, so the installers are unsigned.
+  #
+  # The build and its checks live in package-windows.yml, which release.yml also
+  # calls when a v* tag is pushed: one definition of "a good Windows build", so a
+  # release cannot bypass a check this job runs.
   package-windows:
     name: Windows packaging (NSIS + portable + unpacked)
-    runs-on: windows-latest
-    timeout-minutes: 30
-
-    env:
-      DATABASE_URL: file:./dev.db
-      AUTH_SECRET: ci-only-secret-at-least-32-characters-long
-      APP_URL: http://127.0.0.1:3000
-      STORAGE_DRIVER: local
-      NEXT_TELEMETRY_DISABLED: "1"
-      # No signing certificate exists on CI, and --dir signs nothing anyway.
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # `npm run build` also regenerates the Prisma client, which is what makes
-      # the Windows query engine present to be packaged.
-      - name: Production build
-        run: npm run build
-
-      - name: Bundle demo seed
-        run: npm run desktop:seed:bundle
-
-      # Builds the NSIS installer and the portable exe from win.target, and the
-      # unpacked tree both are packed from, which the next steps inspect.
-      # --publish never: electron-builder treats a CI run as publish-on-draft and
-      # aborts after packaging when no GH_TOKEN exists. Artifacts are the output
-      # here; a release is a deliberate manual step.
-      - name: Package app and installers (win x64)
-        run: npx electron-builder --win --x64 --config electron-builder.yml --publish never
-
-      # Guards the failure this job exists for: a packaging run that succeeds
-      # while the app tree is missing Prisma's generated client, or while it
-      # holds a query engine built for a platform or architecture other than
-      # Windows x64. Both are passed explicitly so the assertion does not depend
-      # on the runner's own platform and architecture.
-      - name: Verify packaged app layout
-        run: node scripts/desktop-package-check.mjs release/win-unpacked/resources/app --platform win32 --arch x64
-
-      # A complete layout can still hold a query engine that will not load on
-      # Windows, so boot the packaged tree and sign in. No window is opened.
-      - name: Smoke the packaged app (migrate, seed, sign in)
-        run: node scripts/desktop-package-smoke.mjs release/win-unpacked/resources/app
-
-      # A packaging run can report success while one Windows target's file
-      # overwrote the other's, so assert both installers are real programs.
-      - name: Verify Windows installers
-        run: node scripts/desktop-installer-check.mjs release
-
-      # The Version tab and the icon are what a person sees in Explorer, and
-      # packaging reports neither: an unset package.json "author" silently
-      # leaves Electron's stub "GitHub, Inc." publisher in place, and an icon
-      # path that points nowhere is only a log line. Parse the resources of the
-      # exes just built and compare them with package.json, electron-builder.yml
-      # and assets/icon.ico.
-      - name: Verify exe metadata and icons
-        run: node scripts/desktop-metadata-check.mjs release
-
-      # What a user downloads: "Lex Indiana Setup <version>.exe" installs per
-      # user (no admin prompt), "Lex Indiana Portable <version>.exe" runs without
-      # installing. Both are unsigned, so SmartScreen warns on first run.
-      - name: Upload Windows installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: lex-indiana-windows-installers
-          path: release/*.exe
-          retention-days: 7
-          if-no-files-found: error
-
-      # The unpacked app needs no installer or signing, so a Windows PC can
-      # unzip this artifact and launch "Lex Indiana.exe" directly.
-      - name: Upload unpacked Windows app
-        uses: actions/upload-artifact@v4
-        with:
-          name: lex-indiana-windows-unpacked
-          path: release/win-unpacked
-          retention-days: 7
-          if-no-files-found: error
-          # The app's .next build and Prisma's generated .prisma client are
-          # dot-directories, and v4 skips hidden files by default -- which
-          # uploads an app that cannot start.
-          include-hidden-files: true
+    uses: ./.github/workflows/package-windows.yml
+    permissions:
+      contents: read
