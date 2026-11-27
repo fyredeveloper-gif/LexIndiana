@@ -16,7 +16,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -93,7 +93,7 @@ model User {
   passwordHash          String
   name                  String
   indianaAttorneyNumber String?
-  defaultHourlyRate     Decimal  @default(0) @db.Decimal(10, 2)
+  defaultHourlyRate     Decimal  @default(0)
   twoFactorSecret       String?
   twoFactorEnabled      Boolean  @default(false)
   createdAt             DateTime @default(now())
@@ -245,7 +245,8 @@ model Contact {
   user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   type         ContactType
   name         String
-  aliases      String[]    @default([])
+  // JSON-encoded string[]: SQLite has no primitive list type (see src/lib/aliases.ts).
+  aliases      String      @default("[]")
   email        String?
   phone        String?
   organization String?
@@ -327,7 +328,7 @@ model TimeEntry {
   startedAt       DateTime?
   endedAt         DateTime?
   durationMinutes Int       @default(0)
-  hourlyRate      Decimal   @db.Decimal(10, 2)
+  hourlyRate      Decimal  
   billable        Boolean   @default(true)
   invoiceId       String?
   invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
@@ -350,11 +351,11 @@ model Invoice {
   matter    Matter        @relation(fields: [matterId], references: [id], onDelete: Restrict)
   number    String
   status    InvoiceStatus @default(DRAFT)
-  issueDate DateTime      @db.Date
-  dueDate   DateTime?     @db.Date
+  issueDate DateTime     
+  dueDate   DateTime?    
   notes     String?
-  subtotal  Decimal       @db.Decimal(10, 2)
-  total     Decimal       @db.Decimal(10, 2)
+  subtotal  Decimal      
+  total     Decimal      
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
@@ -372,10 +373,10 @@ model InvoiceItem {
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   timeEntryId String?
   description String
-  workDate    DateTime @db.Date
-  hours       Decimal  @db.Decimal(8, 2)
-  rate        Decimal  @db.Decimal(10, 2)
-  amount      Decimal  @db.Decimal(10, 2)
+  workDate    DateTime
+  hours       Decimal 
+  rate        Decimal 
+  amount      Decimal 
 
   @@index([invoiceId])
 }
@@ -392,10 +393,10 @@ model Deadline {
   ruleKey       String?
   ruleCitation  String?
   triggerEvent  String
-  triggerDate   DateTime      @db.Date
+  triggerDate   DateTime     
   serviceMethod ServiceMethod @default(E_SERVICE)
   daysAdded     Int
-  dueDate       DateTime      @db.Date
+  dueDate       DateTime     
   completed     Boolean       @default(false)
   notes         String?
   createdAt     DateTime      @default(now())
@@ -419,7 +420,7 @@ model Task {
   createdBy   User         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
   title       String
   description String?
-  dueDate     DateTime?    @db.Date
+  dueDate     DateTime?   
   priority    TaskPriority @default(MEDIUM)
   completed   Boolean      @default(false)
   completedAt DateTime?
@@ -536,4 +537,74 @@ model MatterDocument {
   createdAt  DateTime          @default(now())
 
   @@index([firmId, matterId])
+}
+
+// ---------------------------------------------------------------------------
+// Sync (Phase 2)
+//
+// SyncOperation doubles as the local outbox and the server's change feed:
+// every captured write appends one row; a device pushes rows it has not pushed
+// yet (pushedAt IS NULL) and pulls rows created by other devices.
+// Payloads are JSON text so the same code runs on SQLite and PostgreSQL.
+// ---------------------------------------------------------------------------
+model SyncOperation {
+  id            String    @id @default(cuid())
+  firmId        String
+  deviceId      String
+  entity        String
+  entityId      String
+  operation     String
+  payload       String?
+  baseUpdatedAt DateTime?
+  createdAt     DateTime  @default(now())
+  pushedAt      DateTime?
+  attempts      Int       @default(0)
+  lastError     String?
+
+  @@index([firmId, createdAt])
+  @@index([firmId, deviceId, pushedAt])
+  @@index([firmId, entity, entityId])
+}
+
+/// One row per (firm, device): pull cursor, last successful push, bootstrap marker.
+model SyncCursor {
+  id              String    @id
+  firmId          String
+  deviceId        String
+  lastPulledAt    DateTime?
+  lastPushedAt    DateTime?
+  lastBootstrapAt DateTime?
+  lastError       String?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([firmId])
+}
+
+/// Deletion markers so a late CREATE cannot resurrect a deleted record.
+model SyncTombstone {
+  id        String   @id @default(cuid())
+  firmId    String
+  deviceId  String
+  entity    String
+  entityId  String
+  deletedAt DateTime @default(now())
+
+  @@unique([firmId, entity, entityId])
+  @@index([firmId, deletedAt])
+}
+
+/// A losing local edit. The server version is kept; the user can review it.
+model SyncConflict {
+  id            String    @id @default(cuid())
+  firmId        String
+  deviceId      String
+  entity        String
+  entityId      String
+  localPayload  String?
+  remotePayload String?
+  status        String    @default("OPEN")
+  createdAt     DateTime  @default(now())
+  resolvedAt    DateTime?
+
+  @@index([firmId, status])
 }

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { SessionUser } from "@/lib/auth";
+import { parseAliases } from "@/lib/aliases";
 import { prisma } from "@/lib/prisma";
 import { addDaysISO, isoDate, parseISODate, todayISO } from "@/lib/dates";
 import { CONTACT_TYPE_LABELS, MATTER_STATUS_LABELS, titleCase } from "@/lib/utils";
@@ -493,7 +494,7 @@ export async function getContacts(user: SessionUser): Promise<ContactSummary[]> 
     id: contact.id,
     type: contact.type,
     name: contact.name,
-    aliases: contact.aliases,
+    aliases: parseAliases(contact.aliases),
     email: contact.email,
     phone: contact.phone,
     organization: contact.organization,
@@ -685,7 +686,7 @@ export async function runConflictSearch(user: SessionUser, rawQuery: string) {
   for (const contact of contacts) {
     const matchedFields: string[] = [];
     if (contact.name.toLowerCase().includes(needle)) matchedFields.push("Name");
-    contact.aliases.forEach((alias, index) => {
+    parseAliases(contact.aliases).forEach((alias, index) => {
       if (alias.toLowerCase().includes(needle)) matchedFields.push(`Alias ${index + 1}`);
     });
     if (contact.notes?.toLowerCase().includes(needle)) matchedFields.push("Notes");
@@ -714,7 +715,7 @@ export async function runConflictSearch(user: SessionUser, rawQuery: string) {
         id: contact.id,
         type: contact.type,
         name: contact.name,
-        aliases: contact.aliases,
+        aliases: parseAliases(contact.aliases),
         email: contact.email,
         phone: contact.phone,
         organization: contact.organization,
@@ -822,7 +823,7 @@ export async function screenConflicts(
         {
           id: contact.id,
           name: contact.name,
-          aliases: contact.aliases,
+          aliases: parseAliases(contact.aliases),
           email: contact.email,
           organization: contact.organization,
           notes: contact.notes,

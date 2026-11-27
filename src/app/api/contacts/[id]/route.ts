@@ -9,6 +9,7 @@ import {
   unauthResponse,
   validate,
 } from "@/lib/api";
+import { serializeAliases } from "@/lib/aliases";
 import { prisma } from "@/lib/prisma";
 import { contactUpdateSchema } from "@/lib/validation";
 
@@ -38,7 +39,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const data: Record<string, unknown> = {};
   if (input.type !== undefined) data.type = input.type;
   if (input.name !== undefined) data.name = input.name;
-  if (input.aliases !== undefined) data.aliases = normalizeAliases(input.aliases);
+  if (input.aliases !== undefined) data.aliases = serializeAliases(normalizeAliases(input.aliases));
   if (input.email !== undefined) data.email = input.email || null;
   if (input.phone !== undefined) data.phone = input.phone || null;
   if (input.organization !== undefined) data.organization = input.organization || null;

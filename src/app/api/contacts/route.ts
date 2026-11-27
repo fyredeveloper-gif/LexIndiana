@@ -8,6 +8,7 @@ import {
   unauthResponse,
   validate,
 } from "@/lib/api";
+import { parseAliases, serializeAliases } from "@/lib/aliases";
 import { prisma } from "@/lib/prisma";
 import { contactSchema } from "@/lib/validation";
 
@@ -22,7 +23,9 @@ export async function GET() {
     orderBy: { name: "asc" },
     select: { id: true, type: true, name: true, aliases: true, organization: true },
   });
-  return NextResponse.json({ contacts });
+  return NextResponse.json({
+    contacts: contacts.map((contact) => ({ ...contact, aliases: parseAliases(contact.aliases) })),
+  });
 }
 
 export async function POST(request: Request) {
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
         userId: user.id,
         type: parsed.data.type,
         name: parsed.data.name,
-        aliases: parsed.data.aliases,
+        aliases: serializeAliases(parsed.data.aliases),
         email: parsed.data.email,
         phone: parsed.data.phone,
         organization: parsed.data.organization,

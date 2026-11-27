@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { PrismaClient, type ContactType, type MatterStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { serializeAliases } from "../src/lib/aliases";
 import { addDaysISO, parseISODate, todayISO } from "../src/lib/dates";
 import { calculateDeadline, type ServiceMethodKey } from "../src/lib/deadlines";
 import { buildSampleTemplateDocx } from "../src/lib/docx";
@@ -146,7 +147,7 @@ async function main() {
         userId: user.id,
         type,
         name,
-        aliases: extra.aliases ?? [],
+        aliases: serializeAliases(extra.aliases),
         email: extra.email ?? null,
         phone: extra.phone ?? null,
         organization: extra.organization ?? null,

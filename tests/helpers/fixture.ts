@@ -55,7 +55,9 @@ export function tokenHash(token: string): string {
 }
 
 export async function resetTestDatabase(): Promise<void> {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "Firm", "User" RESTART IDENTITY CASCADE');
+  // SQLite has no TRUNCATE; deleting the tenants cascades to every child row.
+  await prisma.$executeRawUnsafe('DELETE FROM "Firm"');
+  await prisma.$executeRawUnsafe('DELETE FROM "User"');
 }
 
 function sessionFor(

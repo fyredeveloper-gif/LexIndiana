@@ -61,10 +61,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   const input = parsed.data;
 
   try {
-    const existingContact = await prisma.contact.findFirst({
-      where: { firmId: firm.id, type: "CLIENT", email: { equals: input.email, mode: "insensitive" } },
-      select: { id: true, name: true },
+    // `mode: "insensitive"` is a PostgreSQL-only filter, so compare normalized
+    // addresses in application code. Client emails are lowercased on write, but
+    // imported contacts may not be, hence the explicit lowercase compare.
+    const candidateClients = await prisma.contact.findMany({
+      where: { firmId: firm.id, type: "CLIENT", email: { not: null } },
+      select: { id: true, name: true, email: true },
     });
+    const existingContact =
+      candidateClients.find((contact) => contact.email?.toLowerCase() === input.email.toLowerCase()) ?? null;
 
     const terms = [
       input.name,

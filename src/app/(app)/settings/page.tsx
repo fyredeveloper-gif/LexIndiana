@@ -25,12 +25,17 @@ export default async function SettingsPage() {
         title="Settings"
         description="Your personal details populate Indiana court pleadings, generated documents, and invoice headers."
         actions={
-          canSeeFirm ? (
-            <Link href="/firm" className="btn btn-secondary">
-              <Icon name="users" className="h-4 w-4" />
-              Firm & team
+          <>
+            <Link href="/settings/desktop" className="btn btn-secondary">
+              Desktop settings
             </Link>
-          ) : null
+            {canSeeFirm ? (
+              <Link href="/firm" className="btn btn-secondary">
+                <Icon name="users" className="h-4 w-4" />
+                Firm & team
+              </Link>
+            ) : null}
+          </>
         }
       />
 

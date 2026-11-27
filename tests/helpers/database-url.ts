@@ -1,47 +1,30 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 /**
- * Tests never run against the development schema. They use a dedicated
- * PostgreSQL schema (default `lex_indiana_test`) created by `prisma migrate
- * deploy` in global setup.
+ * Tests run against a throwaway SQLite database: no database server is needed,
+ * and the developer's real desktop data files are never touched.
+ *
+ * The path is deterministic so the Vitest config, the global setup process, and
+ * every worker agree on the same file. It is recreated by `prisma migrate
+ * deploy` and emptied before each run.
+ *
+ * CI (or a developer) can override it with TEST_DATABASE_URL, for example
+ * `TEST_DATABASE_URL=file:/tmp/lex-test.db`.
  */
-function loadDotEnv(): void {
-  try {
-    for (const line of readFileSync(path.join(process.cwd(), ".env"), "utf8").split("\n")) {
-      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-      if (match && !process.env[match[1]]) {
-        process.env[match[1]] = match[2].replace(/^["']|["']$/g, "");
-      }
-    }
-  } catch {
-    // CI can supply DATABASE_URL directly.
-  }
+const TEST_DIR = path.join(process.cwd(), ".tmp-test");
+const TEST_FILE = path.join(TEST_DIR, "lex-indiana-test.db");
+
+if (!process.env.TEST_DATABASE_URL) {
+  mkdirSync(TEST_DIR, { recursive: true });
 }
 
-loadDotEnv();
+const configured = process.env.TEST_DATABASE_URL;
 
-const baseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
-if (!baseUrl) {
+if (configured && !configured.startsWith("file:")) {
   throw new Error(
-    "Tests need DATABASE_URL (or TEST_DATABASE_URL) pointing at a PostgreSQL database.",
+    "TEST_DATABASE_URL must be a SQLite file URL (for example file:/tmp/lex-test.db).",
   );
 }
 
-const url = new URL(baseUrl);
-if (!process.env.TEST_DATABASE_URL) {
-  const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-  if (!localHosts.has(url.hostname)) {
-    throw new Error(
-      "Refusing to create a test schema on a non-local database. Set TEST_DATABASE_URL explicitly for a dedicated test server.",
-    );
-  }
-}
-const schema = process.env.TEST_DATABASE_SCHEMA ?? "lex_indiana_test";
-if (schema === "public") {
-  throw new Error("TEST_DATABASE_SCHEMA must not be public; tests truncate their schema.");
-}
-url.searchParams.set("schema", schema);
-
-export const testDatabaseUrl = url.toString();
-export const testDatabaseSchema = schema;
+export const testDatabaseUrl = configured ?? `file:${TEST_FILE}`;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSession, hashPassword } from "@/lib/auth";
 import { jsonError, parseJsonBody, requireSameOrigin, validate } from "@/lib/api";
+import { withBootstrapLock } from "@/lib/bootstrap-lock";
 import { prisma } from "@/lib/prisma";
 import { getRegistrationAccess, REGISTRATION_CLOSED_REASON } from "@/lib/registration";
 import { registerSchema } from "@/lib/validation";
@@ -36,28 +37,30 @@ export async function POST(request: Request) {
   const passwordHash = await hashPassword(password);
 
   try {
-    const user = await prisma.$transaction(async (tx) => {
-      if (registration.mode === "bootstrap") {
-        // Serialize first-owner attempts so two concurrent requests cannot both
-        // observe an empty database and create separate firms.
-        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('lex_indiana_bootstrap'))");
-        const firmCount = await tx.firm.count();
-        if (firmCount > 0) throw new BootstrapClosedError();
-      }
+    // Serialize first-owner attempts so two concurrent requests cannot both
+    // observe an empty database and create separate firms. Portable across
+    // SQLite and PostgreSQL (see src/lib/bootstrap-lock.ts).
+    const user = await withBootstrapLock(() =>
+      prisma.$transaction(async (tx) => {
+        if (registration.mode === "bootstrap") {
+          const firmCount = await tx.firm.count();
+          if (firmCount > 0) throw new BootstrapClosedError();
+        }
 
-      const firm = await tx.firm.create({
-        data: { name: firmName?.trim() || `${name} Law` },
-        select: { id: true },
-      });
-      const created = await tx.user.create({
-        data: { name, email, passwordHash },
-        select: { id: true },
-      });
-      await tx.membership.create({
-        data: { firmId: firm.id, userId: created.id, role: "OWNER" },
-      });
-      return created;
-    });
+        const firm = await tx.firm.create({
+          data: { name: firmName?.trim() || `${name} Law` },
+          select: { id: true },
+        });
+        const created = await tx.user.create({
+          data: { name, email, passwordHash },
+          select: { id: true },
+        });
+        await tx.membership.create({
+          data: { firmId: firm.id, userId: created.id, role: "OWNER" },
+        });
+        return created;
+      }),
+    );
 
     await createSession(user.id, request.headers.get("user-agent"));
     return NextResponse.json({ ok: true }, { status: 201 });
