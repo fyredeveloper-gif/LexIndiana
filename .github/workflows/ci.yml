@@ -142,6 +142,15 @@ jobs:
       - name: Verify Windows installers
         run: node scripts/desktop-installer-check.mjs release
 
+      # The Version tab and the icon are what a person sees in Explorer, and
+      # packaging reports neither: an unset package.json "author" silently
+      # leaves Electron's stub "GitHub, Inc." publisher in place, and an icon
+      # path that points nowhere is only a log line. Parse the resources of the
+      # exes just built and compare them with package.json, electron-builder.yml
+      # and assets/icon.ico.
+      - name: Verify exe metadata and icons
+        run: node scripts/desktop-metadata-check.mjs release
+
       # What a user downloads: "Lex Indiana Setup <version>.exe" installs per
       # user (no admin prompt), "Lex Indiana Portable <version>.exe" runs without
       # installing. Both are unsigned, so SmartScreen warns on first run.

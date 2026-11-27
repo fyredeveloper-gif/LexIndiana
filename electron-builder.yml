@@ -7,9 +7,10 @@
 appId: com.lexindiana.desktop
 productName: Lex Indiana
 # Publisher shown in the exe's Version tab, Task Manager, and Apps & Features.
-# CompanyName comes from package.json "author"; LegalCopyright comes from here,
-# because electron-builder reads copyright from the build config, not package.json.
-copyright: "Copyright © 2026 Haynes & Haynes Inc"
+# CompanyName comes from package.json "author". LegalCopyright is left unset on
+# purpose: electron-builder then writes "Copyright © <build year> <author>", so
+# the year stays current instead of being edited by hand every January.
+# scripts/desktop-metadata-check.mjs asserts both fields in CI.
 directories:
   output: release
   # Icon sources. Not "build": that directory holds Next and seed build output
