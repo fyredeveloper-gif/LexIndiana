@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Multi-tenant legal practice management and client intake platform for Indiana attorneys",
+  "author": {
+    "name": "Haynes & Haynes Inc"
+  },
   "engines": {
     "node": "22.x",
     "npm": ">=10"

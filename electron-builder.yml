@@ -6,6 +6,10 @@
 # most common failure mode when they are packed inside an asar archive.
 appId: com.lexindiana.desktop
 productName: Lex Indiana
+# Publisher shown in the exe's Version tab, Task Manager, and Apps & Features.
+# CompanyName comes from package.json "author"; LegalCopyright comes from here,
+# because electron-builder reads copyright from the build config, not package.json.
+copyright: "Copyright © 2026 Haynes & Haynes Inc"
 directories:
   output: release
   # Icon sources. Not "build": that directory holds Next and seed build output
