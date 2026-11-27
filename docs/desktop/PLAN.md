@@ -353,7 +353,17 @@ not a real Windows executable, or is too small to contain the app:
 
 The exe, shortcut, installer and uninstaller icons all come from `assets/icon.ico`, derived from
 `src/app/icon.svg`. `directories.buildResources` points at `assets/` rather than `build/` because
-`build/` is gitignored Next output, so icons kept there never reach a release. Neither installer is
+`build/` is gitignored Next output, so icons kept there never reach a release.
+
+`scripts/desktop-metadata-check.mjs` parses the version and icon resources of every built exe and
+compares them with `package.json`, `electron-builder.yml` and `assets/icon.ico`. It runs locally as
+the last step of `desktop:installer` and in the Windows CI job, because a packaging run reports
+neither: an unset `author` lets rcedit keep Electron's stub `GitHub, Inc.` publisher, and an icon
+path that points nowhere is only a log line. The copyright line is deliberately not in the config:
+with `copyright` unset electron-builder writes `Copyright © <build year> Haynes & Haynes Inc`, and
+the check computes the same year, so it stays current without an edit every January.
+
+Neither installer is
 code-signed — no certificate is available — so Windows SmartScreen warns on the first run; **More
 info → Run anyway** is the expected path for an internal build. Repositories and uploaded documents
 stay in `%APPDATA%\lex-indiana\data\`, outside the install folder.
