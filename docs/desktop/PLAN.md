@@ -375,13 +375,40 @@ arm64 engine in an x64 package, fails locally and in CI rather than at first lau
 Cross-building a `--win` package on macOS or Linux also fails unless Prisma's `binaryTargets`
 includes `windows`; the Windows runner is the supported way to produce it.
 
-Without a Windows machine — or without opening a pull request — use the manual workflow:
+Without a Windows machine, and without cutting a release, use the manual workflow:
 **Actions → CI → Run workflow**, choose the branch, and tick **Skip the Linux verify job and
 only build the Windows artifact**. The `package-windows` job builds with
 `electron-builder --win --x64`, verifies the layout, smokes the packaged app, checks the installers
 and uploads two artifacts (kept 7 days): `lex-indiana-windows-installers` — the setup and portable
 exe to hand to a Windows user — and `lex-indiana-windows-unpacked` (unzip it and run
 `Lex Indiana.exe`). Neither is signed, so Windows shows a SmartScreen prompt on first run.
+
+The packaging job lives in `.github/workflows/package-windows.yml` and is called by both `ci.yml`
+and `release.yml`, so there is one definition of a good Windows build rather than a second copy that
+can drift.
+
+### Releasing
+
+Bump `version` in `package.json`, merge to `main`, then tag the merge commit:
+
+```
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The tag push runs `.github/workflows/release.yml`, which on its own:
+
+1. fails in seconds if the tag is not `v<package.json version>` or does not point at a commit on
+   `main`, before any Windows build starts;
+2. runs the same packaging job CI runs, checks included — layout, packaged-app smoke, installers
+   and exe metadata;
+3. publishes a GitHub Release named after the tag with both installers attached, checksums in the
+   notes. `gh release upload` turns spaces in asset names into dots, so the served files are
+   `Lex.Indiana.Setup.<version>.exe` and `Lex.Indiana.Portable.<version>.exe`.
+
+Re-running a tag replaces that release's assets and notes instead of failing. Nothing needs to be
+downloaded from an artifact or uploaded by hand, and the release does not expire the way the 7-day
+artifact does.
 
 ### Not yet built
 

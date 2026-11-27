@@ -1,0 +1,153 @@
+name: Release
+
+# Publishing is a tag push: `git tag v1.0.1 && git push origin v1.0.1` builds the
+# Windows installers with the same workflow CI runs (package-windows.yml, checks
+# included) and attaches them to a GitHub Release, so the download link is
+# permanent instead of a seven-day artifact.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+# One release per tag. A re-push of the same tag must not race its first run's
+# asset upload.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Fail in seconds, before the five-minute Windows build, when the tag does not
+  # describe the code. A v1.0.1 tag on a commit whose package.json still says
+  # 1.0.0 would otherwise publish a binary labelled with the wrong version, and
+  # a tag on an unmerged branch would ship code that never went through review.
+  check:
+    name: Tag matches package.json and main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The ancestry check needs main's history, not one commit.
+          fetch-depth: 0
+
+      - name: Tag is v<package.json version>
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="$GITHUB_REF_NAME"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match package.json version $version (expected v$version)"
+            exit 1
+          fi
+          echo "tag $tag matches package.json version $version"
+
+      - name: Tag is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on main; tag a main commit so the release ships reviewed code"
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main"
+
+  # The packaged build and every check that goes with it. Nothing here repeats
+  # the packaging steps: this job is the CI job.
+  package:
+    name: Windows packaging (NSIS + portable + unpacked)
+    needs: check
+    uses: ./.github/workflows/package-windows.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish GitHub Release
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Creating the release and uploading its assets.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.installers-artifact }}
+          path: installers
+
+      # gh release upload replaces spaces in asset names with dots, and GitHub
+      # has no API to rename an asset afterwards, so name the files the way they
+      # will be served before uploading.
+      - name: Name the assets GitHub will serve
+        run: |
+          mkdir -p assets
+          for file in installers/*.exe; do
+            cp "$file" "assets/$(basename "$file" | tr ' ' '.')"
+          done
+          ls -l assets
+
+      - name: Write release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo 'Offline-capable Windows build of the Lex Indiana practice management app: an Electron shell that runs the Next.js server locally against SQLite, with a sync engine that reconciles local writes against the server.'
+            echo
+            echo '## Downloads'
+            echo
+            echo '| File | What it is |'
+            echo '| --- | --- |'
+            for file in assets/*.exe; do
+              name="$(basename "$file")"
+              case "$name" in
+                *Setup*) what='NSIS installer. Per-user, so there is no admin prompt. Installs to %LOCALAPPDATA%\Programs\Lex Indiana, and uninstalling keeps your data.' ;;
+                *Portable*) what='Single file, runs without installing.' ;;
+                *) what='Windows executable.' ;;
+              esac
+              echo "| $name | $what |"
+            done
+            echo
+            echo 'Windows 10 or 11, 64-bit.'
+            echo
+            echo '## First run'
+            echo
+            echo 'The installers are **not code-signed**, so Windows SmartScreen shows "Windows protected your PC". Choose **More info -> Run anyway**. A demo firm is seeded on first launch.'
+            echo
+            echo 'Firm data and uploaded documents live in %APPDATA%\lex-indiana\data\, outside the install folder, and survive uninstall and upgrades.'
+            echo
+            echo '## Checksums'
+            echo
+            echo '```'
+            (cd assets && sha256sum *.exe)
+            echo '```'
+            echo
+            echo 'GitHub reports the same digest for each asset. Verify on Windows with'
+            echo "certutil -hashfile <file> SHA256, or compare against the upload's digest."
+            echo
+            echo '## Where these came from'
+            echo
+            echo "Built by [$GITHUB_REF_NAME CI run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) from commit $GITHUB_SHA, which typechecked, ran the test suite, and packaged on a Windows runner with the installer, packaged-app and exe-metadata checks."
+          } > notes.md
+          cat notes.md
+
+      - name: Publish
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A re-run of a tag that already has a release: replace the assets and
+            # the notes rather than failing.
+            echo "release $tag already exists; replacing its assets"
+            gh release upload "$tag" assets/*.exe --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" assets/*.exe \
+              --title "Lex Indiana ${tag#v} (Windows)" \
+              --notes-file notes.md \
+              --verify-tag \
+              --repo "$GITHUB_REPOSITORY"
+          fi
