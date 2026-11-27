@@ -2,6 +2,10 @@ name: CI
 
 on:
   push:
+    # Branches only: a pushed tag is release.yml's job, and matching tags here
+    # would package Windows twice and upload two copies of every installer.
+    branches:
+      - "**"
   pull_request:
   # Manual runs build the Windows artifact on demand, without a pull request.
   # Set "Windows only" to skip the Linux verify job and package just Windows.
