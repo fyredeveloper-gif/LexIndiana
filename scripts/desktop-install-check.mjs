@@ -276,14 +276,23 @@ async function main() {
   // temp, so a clean exit code is not the signal: the files leaving is.
   if (uninstall.code !== 0) say(`uninstaller exited with ${uninstall.code}; waiting for its work to finish anyway`);
 
-  await waitFor("the installed executable to be removed", () => !existsSync(paths.installedExe), UNINSTALL_TIMEOUT_MS);
-  must(!existsSync(paths.uninstaller), `the uninstaller left ${paths.uninstaller} behind`);
-  must(!existsSync(paths.startMenuShortcut), `the uninstaller left the Start-menu shortcut ${paths.startMenuShortcut}`);
-  must(!existsSync(paths.desktopShortcut), `the uninstaller left the desktop shortcut ${paths.desktopShortcut}`);
-  if (existsSync(paths.installDir)) {
-    const leftovers = readdirSync(paths.installDir);
-    must(leftovers.length === 0, `the uninstaller left files in ${paths.installDir}: ${leftovers.join(", ")}`);
-  }
+  // NSIS copies the uninstaller to %TEMP% (Un_A.exe) and runs that copy, which
+  // removes the install folder's files -- including the uninstaller it was
+  // copied from -- on its own schedule. Waiting for the exe alone races it by a
+  // second, so the uninstaller's own file leaving is the signal that the work is
+  // done.
+  await waitFor(
+    "the uninstaller to finish",
+    () => !existsSync(paths.installedExe) && !existsSync(paths.uninstaller),
+    UNINSTALL_TIMEOUT_MS,
+  );
+  await waitFor("the Start-menu shortcut to be removed", () => !existsSync(paths.startMenuShortcut), 60_000);
+  await waitFor("the desktop shortcut to be removed", () => !existsSync(paths.desktopShortcut), 60_000);
+  await waitFor(
+    "the install folder to be emptied",
+    () => !existsSync(paths.installDir) || readdirSync(paths.installDir).length === 0,
+    60_000,
+  );
   say("uninstall removed the install folder and shortcuts");
 
   // --- the data folder must survive --------------------------------------
