@@ -363,6 +363,18 @@ path that points nowhere is only a log line. The copyright line is deliberately 
 with `copyright` unset electron-builder writes `Copyright © <build year> Haynes & Haynes Inc`, and
 the check computes the same year, so it stays current without an edit every January.
 
+`scripts/desktop-install-check.mjs` is the only check that runs an installer. On Windows it
+installs `Lex Indiana Setup <version>.exe` with `/S` — per-user, so no admin prompt — asserts the
+app landed in `%LOCALAPPDATA%\Programs\Lex Indiana` with its uninstaller, resolves the Start-menu
+shortcut through COM and requires it to target that exe, checks the installed exe is still the
+build packaging produced, launches it and waits for the demo repository and settings file, then
+uninstalls silently and requires the install folder and shortcuts to be gone while the data folder
+still holds a marker written after launch, the unchanged database and `desktop.config.json`. It
+refuses to run where the app is already installed, because a preinstalled copy would hide whether
+uninstalling keeps user data. It runs as a second job in `package-windows.yml`, after packaging,
+so it installs the artifact the packaging job built instead of building Windows twice; CI runs it,
+and so does a release tag.
+
 Neither installer is
 code-signed — no certificate is available — so Windows SmartScreen warns on the first run; **More
 info → Run anyway** is the expected path for an internal build. Repositories and uploaded documents
@@ -400,8 +412,8 @@ The tag push runs `.github/workflows/release.yml`, which on its own:
 
 1. fails in seconds if the tag is not `v<package.json version>` or does not point at a commit on
    `main`, before any Windows build starts;
-2. runs the same packaging job CI runs, checks included — layout, packaged-app smoke, installers
-   and exe metadata;
+2. runs the same packaging job CI runs, checks included — layout, packaged-app smoke, installers,
+   exe metadata, and an install/launch/uninstall of the NSIS build;
 3. publishes a GitHub Release named after the tag with both installers attached, checksums in the
    notes. `gh release upload` turns spaces in asset names into dots, so the served files are
    `Lex.Indiana.Setup.<version>.exe` and `Lex.Indiana.Portable.<version>.exe`.

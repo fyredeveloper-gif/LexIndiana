@@ -117,3 +117,39 @@ jobs:
           # dot-directories, and v4 skips hidden files by default -- which
           # uploads an app that cannot start.
           include-hidden-files: true
+
+  # Everything above judges files on disk. None of it runs an installer, so the
+  # things that only exist after an install -- the per-user install folder, the
+  # Start-menu shortcut's target, the installed app actually starting, and a
+  # firm's data folder surviving an uninstall -- were never verified. This job
+  # installs the NSIS build on a Windows runner, launches the installed exe,
+  # uninstalls it and checks the data folder is still there. It needs the
+  # packaging job's artifact, so it runs once per build instead of packaging
+  # Windows a second time.
+  install-check:
+    name: Install, launch, uninstall (NSIS)
+    needs: package-windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Download the installers this job installs
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package-windows.outputs.installers-artifact }}
+          path: release
+
+      # Silent install with no admin prompt, then launch the installed exe, then
+      # uninstall. Fails if the install folder or shortcut is missing, points at
+      # the wrong target, the app never creates its repository, or the data
+      # folder does not survive the uninstall.
+      - name: Install, launch and uninstall the NSIS build
+        run: node scripts/desktop-install-check.mjs release
