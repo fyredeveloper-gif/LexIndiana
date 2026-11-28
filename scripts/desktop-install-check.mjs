@@ -22,10 +22,6 @@ import { expectedIdentity, inspectExe, readIco, yamlValue } from "./pe-metadata.
  *
  * Usage: node scripts/desktop-install-check.mjs [release-dir]
  */
-const PRODUCT_NAME = "Lex Indiana";
-// Must match `app.getName()`: the packaged package.json has no `productName`,
-// so Electron falls back to `name` and userData is %APPDATA%\<name>.
-const USER_DATA_DIR_NAME = "lex-indiana";
 // First launch migrates a fresh database and seeds the demo firm, which takes
 // longer than packaging does on a cold runner.
 const LAUNCH_TIMEOUT_MS = 5 * 60_000;
@@ -47,11 +43,14 @@ if (!existsSync(RELEASE_DIR)) {
 /** Everything printed by this check, so a failure reads like the other checks. */
 const say = (message) => console.log(`[install-check] ${message}`);
 
+/** Set from the build config once it is read; used to clean up after a failure. */
+let exeName = "";
+
 function fail(message) {
   console.error(`[install-check] ${message}`);
   // process.exit skips `finally`, so a failure after the app was launched would
   // otherwise leave a window open on the runner for the rest of the job.
-  spawnSync("taskkill", ["/IM", `${PRODUCT_NAME}.exe`, "/T", "/F"], { stdio: "ignore", windowsHide: true });
+  if (exeName !== "") spawnSync("taskkill", ["/IM", exeName, "/T", "/F"], { stdio: "ignore", windowsHide: true });
   process.exit(1);
 }
 
@@ -80,6 +79,20 @@ function runCommand(file, args, timeoutMs) {
       resolve({ code, stdout, stderr });
     });
   });
+}
+
+/**
+ * A scalar inside a one-level block, for `nsis.shortcutName`, since `yamlValue`
+ * only reads top-level keys. The block ends at the next line in column 0; its
+ * own indentation is stripped so `yamlValue` can read it unchanged.
+ */
+function yamlSectionValue(text, section, key) {
+  const header = new RegExp(`^${section}:[ \\t]*$`, "m").exec(text);
+  if (header == null) return null;
+  const rest = text.slice(header.index + header[0].length);
+  const end = rest.search(/^\S/m);
+  const block = (end === -1 ? rest : rest.slice(0, end)).replace(/^[ \t]+/gm, "");
+  return yamlValue(block, key, { optional: true });
 }
 
 /** Polls until `predicate` holds, failing the step instead of hanging. */
@@ -146,6 +159,30 @@ function assertCleanStart(paths) {
   if (existsSync(paths.userDataDir)) fail(`the runner already has ${paths.userDataDir}; remove it and rerun`);
 }
 
+// Every install-time name is derived, never restated here: electron-builder
+// builds the install folder, exe, uninstaller and shortcut names from
+// `productName` and `nsis.shortcutName`, and Electron builds userData from
+// package.json, so a rename must not leave this check asserting the previous
+// release's paths.
+let PRODUCT_NAME;
+let SHORTCUT_NAME;
+let USER_DATA_DIR_NAME;
+let pkg;
+let buildConfigText;
+try {
+  buildConfigText = readFileSync(path.join(ROOT, "electron-builder.yml"), "utf8");
+  pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  PRODUCT_NAME = yamlValue(buildConfigText, "productName");
+  // electron-builder falls back to productName when shortcutName is unset.
+  SHORTCUT_NAME = yamlSectionValue(buildConfigText, "nsis", "shortcutName") ?? PRODUCT_NAME;
+  // `app.getName()` prefers package.json `productName` over `name`, and the
+  // packaged package.json keeps whichever of them this repo has.
+  USER_DATA_DIR_NAME = pkg.productName ?? pkg.name;
+  exeName = `${PRODUCT_NAME}.exe`;
+} catch (error) {
+  fail(`could not derive the product identity: ${error instanceof Error ? error.message : String(error)}`);
+}
+
 async function main() {
   const installer = readdirSync(RELEASE_DIR, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /Setup .*\.exe$/i.test(entry.name))
@@ -161,22 +198,24 @@ async function main() {
   const appData = process.env.APPDATA;
   must(localAppData && appData, "LOCALAPPDATA and APPDATA must be set; run this in a normal user session");
 
+  const shortcuts = `${SHORTCUT_NAME}.lnk`;
   const paths = {
     // electron-builder's per-user NSIS target: no admin prompt, no Program Files.
     installDir: path.join(localAppData, "Programs", PRODUCT_NAME),
-    startMenuShortcut: path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs", `${PRODUCT_NAME}.lnk`),
-    shortcutName: `${PRODUCT_NAME}.lnk`,
-    desktopShortcut: path.join(desktopDir(path.join(appData, "..", "Desktop")), `${PRODUCT_NAME}.lnk`),
+    startMenuShortcut: path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs", shortcuts),
+    shortcutName: shortcuts,
+    desktopShortcut: path.join(desktopDir(path.join(appData, "..", "Desktop")), shortcuts),
     userDataDir: path.join(appData, USER_DATA_DIR_NAME),
   };
-  paths.installedExe = path.join(paths.installDir, `${PRODUCT_NAME}.exe`);
-  paths.uninstaller = path.join(paths.installDir, `Uninstall ${PRODUCT_NAME}.exe`);
+  paths.installedExe = path.join(paths.installDir, exeName);
+  paths.uninstaller = path.join(paths.installDir, `Uninstall ${exeName}`);
   paths.dataRoot = path.join(paths.userDataDir, "data");
   paths.demoDb = path.join(paths.dataRoot, "demo", "lex-indiana.db");
   paths.seedMarker = path.join(paths.dataRoot, "demo", ".seeded");
   paths.configFile = path.join(paths.userDataDir, "desktop.config.json");
   paths.survivorMarker = path.join(paths.dataRoot, "install-check-marker.txt");
 
+  say(`product "${PRODUCT_NAME}", shortcut "${paths.shortcutName}", data folder "${USER_DATA_DIR_NAME}"`);
   assertCleanStart(paths);
 
   // --- install ------------------------------------------------------------
@@ -187,7 +226,7 @@ async function main() {
   // runAfterFinish can leave the app running right after a silent install; a
   // running copy would hold the single-instance lock and make our own launch
   // exit immediately.
-  spawnSync("taskkill", ["/IM", `${PRODUCT_NAME}.exe`, "/T", "/F"], { stdio: "ignore", windowsHide: true });
+  spawnSync("taskkill", ["/IM", exeName, "/T", "/F"], { stdio: "ignore", windowsHide: true });
 
   await waitFor(`the installed app at ${paths.installedExe}`, () => existsSync(paths.installedExe), INSTALL_TIMEOUT_MS);
   must(existsSync(paths.uninstaller), `the installer did not write an uninstaller to ${paths.installDir}`);
@@ -216,12 +255,10 @@ async function main() {
 
   // The installer copies the exe the packaging job built; assert the installed
   // copy is still that build instead of trusting the copy step.
-  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  const buildConfigText = readFileSync(path.join(ROOT, "electron-builder.yml"), "utf8");
   const expected = expectedIdentity({
     pkg,
     buildConfig: {
-      productName: yamlValue(buildConfigText, "productName"),
+      productName: PRODUCT_NAME,
       copyright: yamlValue(buildConfigText, "copyright", { optional: true }),
     },
   });
